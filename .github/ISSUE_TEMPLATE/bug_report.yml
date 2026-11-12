@@ -1,0 +1,79 @@
+name: "🐛 Bug report"
+description: "Report unexpected behavior, a failure or a regression."
+title: "[Bug]: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting a bug! Check that a similar issue is not already open and read
+        [`CONSTITUTION.md`](https://github.com/jasonCastano/evaluate_kobo_form_images/blob/main/CONSTITUTION.md).
+
+        ⚠️ Do not attach field data, Kobo tokens or images from real submissions.
+
+  - type: textarea
+    id: description
+    attributes:
+      label: "Problem description"
+      description: "Clearly describe what is failing."
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: "Steps to reproduce"
+      placeholder: |
+        1. Run `make run`
+        2. Select form `...` and data export `...`
+        3. Observe `...`
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: "Expected behavior"
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: "Actual behavior"
+      description: "Include the error message if any."
+    validations:
+      required: true
+
+  - type: dropdown
+    id: component
+    attributes:
+      label: "Affected component"
+      options:
+        - "XLSForm parsing"
+        - "Kobo export scanning"
+        - "Image download"
+        - "User interface"
+        - "Excel report"
+        - "Tooling (uv, tests, CI)"
+        - "Documentation"
+        - "Other"
+      multiple: true
+    validations:
+      required: false
+
+  - type: input
+    id: environment
+    attributes:
+      label: "Environment"
+      placeholder: "Windows 11 · Python 3.13 · uv 0.13.1"
+    validations:
+      required: false
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: "Evidence / logs"
+      render: shell
+    validations:
+      required: false

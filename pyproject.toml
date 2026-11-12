@@ -1,0 +1,65 @@
+[project]
+name = "evaluate_kobo_form_images"
+version = "0.1.0"
+description = "Streamlit app to review and grade the quality of images collected with KoboToolbox forms and export the evaluation to Excel."
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
+requires-python = ">=3.13"
+keywords = ["kobotoolbox", "xlsform", "image-quality", "streamlit", "data-quality"]
+authors = [
+    { name = "Jason Alejandro Castaño", email = "jasonale3007@gmail.com" },
+]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Framework :: Streamlit",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.13",
+    "Typing :: Typed",
+]
+dependencies = [
+    "openpyxl>=3.1.5",
+    "pillow>=13.0.0",
+    "python-dotenv>=1.2.4",
+    "requests>=2.34.2",
+    "streamlit>=1.67.0",
+]
+
+[project.scripts]
+evaluate-kobo-images = "evaluate_kobo_form_images.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/jasonCastano/evaluate_kobo_form_images"
+Repository = "https://github.com/jasonCastano/evaluate_kobo_form_images"
+Issues = "https://github.com/jasonCastano/evaluate_kobo_form_images/issues"
+
+[build-system]
+requires = ["uv_build>=0.13.1,<0.14.0"]
+build-backend = "uv_build"
+
+[dependency-groups]
+dev = [
+    "pre-commit>=3.7",
+    "pytest>=8.0",
+    "ruff>=0.6",
+    "ty>=0.0.1",
+    "types-requests>=2.33.0.20261030",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py313"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "SIM", "RUF", "C4"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["evaluate_kobo_form_images"]
+
+[tool.ruff.format]
+quote-style = "double"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"

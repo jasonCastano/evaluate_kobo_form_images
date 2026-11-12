@@ -1,0 +1,41 @@
+name: "🔬 Spike / investigation"
+description: "Propose a time-boxed technical investigation with a clear question and deliverable."
+title: "[Spike]: "
+labels: ["spike"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        A **spike** is a time-boxed investigation that reduces technical uncertainty before
+        committing to an implementation. Always define a **question** and a **timebox**.
+
+  - type: textarea
+    id: question
+    attributes:
+      label: "Research question / hypothesis"
+      placeholder: "Is it feasible to ... ?"
+    validations:
+      required: true
+
+  - type: textarea
+    id: context
+    attributes:
+      label: "Context and motivation"
+    validations:
+      required: true
+
+  - type: textarea
+    id: deliverable
+    attributes:
+      label: "Scope and expected deliverable"
+      placeholder: "Minimal prototype + findings note in `docs/`."
+    validations:
+      required: true
+
+  - type: input
+    id: timebox
+    attributes:
+      label: "Timebox"
+      placeholder: "2 working days"
+    validations:
+      required: true

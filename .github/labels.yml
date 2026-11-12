@@ -1,0 +1,40 @@
+# Repository labels (single source of truth).
+# Synced to GitHub by .github/workflows/labels.yml
+# Format: name, color (hex without '#'), description.
+
+# --- Type of work ---
+- name: bug
+  color: d73a4a
+  description: "Something is not working"
+- name: enhancement
+  color: a2eeef
+  description: "New feature or improvement"
+- name: documentation
+  color: 0075ca
+  description: "Documentation improvements or additions"
+- name: spike
+  color: 5319e7
+  description: "Time-boxed technical investigation"
+- name: refactor
+  color: cfb62e
+  description: "Internal change without behavior change"
+- name: test
+  color: 0e8a16
+  description: "Tests and coverage"
+- name: chore
+  color: fef2c0
+  description: "Maintenance and configuration"
+
+# --- Technical area ---
+- name: ui
+  color: f9d0c4
+  description: "Streamlit user interface"
+- name: kobo
+  color: 5319e7
+  description: "XLSForm parsing, Kobo exports and attachment download"
+- name: report
+  color: fbca04
+  description: "Excel evaluation report"
+- name: infra
+  color: bfdadc
+  description: "Environment, tooling and CI"
