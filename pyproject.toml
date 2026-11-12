@@ -50,6 +50,8 @@ dev = [
 line-length = 100
 target-version = "py313"
 src = ["src", "tests"]
+# Vendored Spec Kit scripts are managed by `specify`, not linted here.
+extend-exclude = [".specify"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "B", "UP", "SIM", "RUF", "C4"]
@@ -59,6 +61,9 @@ known-first-party = ["evaluate_kobo_form_images"]
 
 [tool.ruff.format]
 quote-style = "double"
+
+[tool.ty.src]
+exclude = [".specify"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

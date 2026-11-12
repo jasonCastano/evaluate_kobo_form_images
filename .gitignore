@@ -51,5 +51,8 @@ desktop.ini
 # Streamlit local secrets
 .streamlit/secrets.toml
 
+# Claude Code personal overrides
+.claude/settings.local.json
+
 # tgrep index
 .tgrep/

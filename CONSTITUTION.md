@@ -98,6 +98,7 @@ question and image.
 | **Lint / format** | [Ruff](https://docs.astral.sh/ruff/) |
 | **Pre-commit** | [pre-commit](https://pre-commit.com) |
 | **CI** | [GitHub Actions](.github/workflows/ci.yml) |
+| **Spec-driven development** | [GitHub Spec Kit](https://github.com/github/spec-kit) 1.2.3 (Claude Code skills) |
 
 > ⚠️ **Hard rule:** all dependency and environment management goes through `uv`. `pip` and
 > `requirements.txt` are **forbidden**.
@@ -140,6 +141,10 @@ evaluate_kobo_form_images/
 ├── .github/                         # PR/issue templates, CI, labels
 ├── .streamlit/config.toml           # Streamlit settings (upload size, telemetry off)
 ├── .opencode/rules/                 # agent rules (tgrep)
+├── .claude/                         # Claude Code: settings (no AI attribution) + Spec Kit skills
+├── .specify/                        # Spec Kit: memory/constitution.md, templates, scripts
+├── specs/                           # Spec Kit feature artifacts (specs/NNN-name/)
+├── CLAUDE.md                        # instructions for Claude Code
 ├── forms/  data/                    # LOCAL ONLY (git-ignored): Kobo forms and exports
 ├── evaluations/  .cache/            # LOCAL ONLY (git-ignored): autosave and image cache
 ├── .env.example                     # configuration template (copy to .env)
@@ -199,7 +204,16 @@ evaluate_kobo_form_images/
 - **Main branch:** `main`, integrated through Pull Requests.
 - **Branches:** `feat/...`, `fix/...`, `docs/...`, `refactor/...`, `test/...`, `chore/...`.
 
-## 10. Daily workflow (commit + push)
+## 10. Spec-driven development (Spec Kit + Claude Code)
+
+New features follow the Spec Kit flow inside Claude Code:
+`/speckit-specify` → (`/speckit-clarify`) → `/speckit-plan` → `/speckit-tasks` →
+(`/speckit-analyze`) → `/speckit-implement`. Artifacts live in `specs/NNN-feature-name/` and are
+committed. Spec Kit's principles file `.specify/memory/constitution.md` is derived from this
+document; **both are updated together**. `.claude/settings.json` disables Claude commit/PR
+attribution for everyone using the repository.
+
+## 10.1 Daily workflow (commit + push)
 
 ```bash
 git status                       # 1. review changes
@@ -223,6 +237,8 @@ git push                         # 5. push
 | 2026-11-12 | Autosave evaluations as JSON per (form, export) pair | Never lose work; resume across sessions |
 | 2026-11-12 | Field data and tokens are git-ignored | Data protection |
 | 2026-11-12 | No AI/bot contributors; Dependabot disabled | Owner requirement: only humans appear as contributors |
+| 2026-11-12 | Adopt GitHub Spec Kit (Claude integration, Python scripts) | Spec-driven development with Claude Code; principles mirrored in `.specify/memory/constitution.md` |
+| 2026-11-12 | Disable Claude attribution in `.claude/settings.json` | Enforce the human-authorship rule at tool level |
 | 2026-11-12 | Force a project-local `.venv` | The workstation sets a global `UV_PROJECT_ENVIRONMENT` shared with another project |
 
 ## 12. Notes and roadmap
