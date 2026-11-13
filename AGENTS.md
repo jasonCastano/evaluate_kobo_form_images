@@ -24,6 +24,14 @@ and export the evaluation to Excel.
 - Keep business logic out of `app.py`; it belongs in `xlsform.py`, `kobo_export.py`,
   `kobo_client.py`, `evaluation.py` or `report.py`, with tests.
 
+## Branch model
+
+- `main` is **user-only** (published files); `develop` is the full project.
+- Start every branch from `develop` and open PRs with `--base develop`. Never push to, merge
+  `develop` into, or open feature PRs against `main`.
+- Publish to `main` only with `scripts/release_to_main.py` (see `DEVELOPMENT.md`).
+- Never delete the base branch of an open PR; never force-push.
+
 ## Commands
 
 ```bash

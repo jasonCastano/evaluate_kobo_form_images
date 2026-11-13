@@ -32,9 +32,6 @@ properly. **Evaluate Kobo Form Images** is a local web app that lets an evaluato
 5. **Resume** later — on another day, computer or by another evaluator — by importing a
    previously exported report.
 
-> 📘 The technical source of truth (stack, rules, architecture and decisions) is
-> [`CONSTITUTION.md`](./CONSTITUTION.md). Read it before contributing.
-
 ## 📑 Table of contents
 
 - [Overview](#-overview)
@@ -47,9 +44,8 @@ properly. **Evaluate Kobo Form Images** is a local web app that lets an evaluato
 - [Excel report reference](#-excel-report-reference)
 - [Configuration](#️-configuration)
 - [Troubleshooting](#-troubleshooting)
-- [Quality and automation](#-quality-and-automation)
+- [Quality checks](#-quality-checks)
 - [Repository structure](#-repository-structure)
-- [Contributing](#-contributing)
 - [License](#-license)
 
 ## ✨ Features
@@ -349,7 +345,9 @@ Field data never enters Git: `forms/`, `data/`, `evaluations/`, `exports/`, `.ca
 | `N rows were rejected` / `N evaluated rows did not match any image in this export.` | Edited rows, or a report from another export | Expand the list; load the matching export |
 | `uv run` hangs or packages go to another environment | Global `UV_PROJECT_ENVIRONMENT` or no access to PyPI | Use `.\.venv\Scripts\evaluate-kobo-images.exe` or `make run` |
 
-## ✅ Quality and automation
+## ✅ Quality checks
+
+Automated tests and code checks (the same ones that run in CI on every change):
 
 | `make` command | Without `make` (Windows) | Description |
 |----------------|--------------------------|-------------|
@@ -375,28 +373,21 @@ evaluate_kobo_form_images/
 │   ├── evaluation.py     # evaluation model, autosave and merge
 │   ├── report.py         # Excel report and local saving
 │   └── report_import.py  # import a previous report (resume)
-├── tests/                # pytest suite (synthetic fixtures only)
-├── specs/                # Spec Kit feature specifications (spec, plan, tasks)
-├── docs/                 # documentation
-├── .github/              # CI, PR and issue templates, labels
-├── .claude/ .specify/    # Claude Code + Spec Kit configuration
-├── CONSTITUTION.md       # single source of truth
+├── tests/                # automated tests (synthetic data only)
+├── .github/workflows/    # CI
+├── .streamlit/           # app settings
+├── .env.example          # optional configuration template
 ├── Makefile · pyproject.toml · uv.lock
+├── LICENSE
 └── (local only, git-ignored) forms/ data/ evaluations/ exports/ .cache/ .env
 ```
-
-## 🤝 Contributing
-
-See [`CONTRIBUTING.md`](./CONTRIBUTING.md). New features follow the Spec Kit flow
-(`/speckit-specify` → `/speckit-plan` → `/speckit-tasks` → `/speckit-implement`, see
-[`CLAUDE.md`](./CLAUDE.md)). Branch from `main`, run `make check`, use
-[Conventional Commits](https://www.conventionalcommits.org/), open a PR and keep
-[`CONSTITUTION.md`](./CONSTITUTION.md) up to date. Commits must be authored by humans only — no
-AI/bot co-author trailers.
 
 ## 📄 License
 
 Distributed under the [MIT License](./LICENSE).
+
+> 👩‍💻 **Developers:** the full project (specifications, governance and tooling docs) lives on the
+> [`develop`](https://github.com/jasonCastano/evaluate_kobo_form_images/tree/develop) branch.
 
 ---
 

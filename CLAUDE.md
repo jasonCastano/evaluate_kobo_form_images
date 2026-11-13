@@ -26,6 +26,14 @@ Spec Kit skills are installed in `.claude/skills/`. Use them for new features:
 
 Spec Kit scripts are the Python variant (`.specify/scripts/python/`).
 
+## Branch model
+
+- `main` is **user-only** (published files); `develop` is the full project.
+- Start every branch from `develop` and open PRs with `--base develop`. Never push to, merge
+  `develop` into, or open feature PRs against `main`.
+- Publish to `main` only with `scripts/release_to_main.py` (see `DEVELOPMENT.md`).
+- Never delete the base branch of an open PR; never force-push.
+
 ## Non-negotiable rules
 
 - Everything in English: code, UI, specs, plans, tasks, docs, reports, commit messages.
