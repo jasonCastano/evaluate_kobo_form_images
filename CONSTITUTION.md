@@ -245,6 +245,7 @@ git push                         # 5. push
 | 2026-11-12 | Autosave evaluations as JSON per (form, export) pair | Never lose work; resume across sessions |
 | 2026-11-13 | Save reports server-side to a chosen folder instead of browser download | Browser download ignored the intended folder (feature 002) |
 | 2026-11-13 | Resume by importing a previous report; newer evaluation wins, never delete | Multi-session / multi-evaluator review (feature 002) |
+| 2026-11-13 | Merge stacked PRs #1 and #2 with merge commits (not squash) | Avoid rewriting a published branch; keeps human-authored commits (feature 003). Lesson: never delete the base branch of an open stacked PR (it closes the PR); retarget it to `main` first |
 | 2026-11-12 | Field data and tokens are git-ignored | Data protection |
 | 2026-11-12 | Sign in with Kobo username/password via `/token/` (password used once, key in memory only) | Reviewers know passwords, not API keys (spec 001) |
 | 2026-11-12 | Send the API key only to the signed-in server host | Prevent token leakage |
@@ -261,6 +262,7 @@ git push                         # 5. push
 - [ ] Verify sign-in and image download end-to-end with a real Kobo account (all exports).
 - [ ] Protect `main` (require PR + green CI).
 - [x] Import a previous Excel report to resume or merge evaluations (spec `specs/002-report-export-resume`).
+- [x] Detailed README user guide and "how it works" (spec `specs/003-readme-user-guide`).
 - [ ] Optional gallery/grid view and keyboard shortcuts for faster review.
 - [ ] Spike: automatic brightness / blur scores to pre-sort images.
 
