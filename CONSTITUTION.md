@@ -47,7 +47,8 @@ question and image.
 - Reading Kobo `.xlsx` data exports — every sheet (main table and one sheet per repeat), in
   both **"XML values and headers"** and **"Labels"** header modes, with or without group
   prefixes — and producing one record per image attachment (`<header>_URL` column).
-- Downloading attachments with a Kobo API token (attachments are not public), with a local
+- Signing in to Kobo from the UI (username & password exchanged once for the API key, or
+  an API key) and downloading attachments with it (attachments are not public), with a local
   display cache and prefetching of the next images.
 - Evaluation per image: **Valid / Invalid**; when invalid, one or more reasons from a closed
   list plus free-text comments.
@@ -110,7 +111,8 @@ question and image.
                                                    │
  Kobo export (.xlsx) ─────────────► kobo_export.scan_export ──► ImageRecord[] (one per image)
                                                    │
- Kobo API (token) ◄── kobo_client.KoboImageClient ◄┤  (download + EXIF fix + resize + disk cache)
+ Kobo /token/, /me/ ◄── kobo_auth.sign_in_* ──► KoboSession (memory only)
+ Kobo API (token) ◄── kobo_client.KoboImageClient ◄┤  (host-scoped key + EXIF fix + resize + cache)
                                                    │
                        app.py (Streamlit UI) ──────┤──► evaluation.EvaluationStore (JSON autosave)
                                                    │
@@ -121,7 +123,8 @@ question and image.
 |--------|----------------|
 | `xlsform.py` | Parse the `survey`/`settings` sheets; image questions with group/repeat paths and labels. |
 | `kobo_export.py` | Scan every sheet of a Kobo export, map `_URL` columns to questions, build `ImageRecord`s. |
-| `kobo_client.py` | Authenticated attachment download, display JPEG conversion, disk cache. |
+| `kobo_auth.py` | Kobo servers, sign-in (password → API key via `/token/`, key check via `/me/`), in-memory `KoboSession`. |
+| `kobo_client.py` | Host-scoped authenticated attachment download with typed failures, display JPEG conversion, disk cache. |
 | `evaluation.py` | `Verdict`, `InvalidReason`, `Evaluation` validation and `EvaluationStore` persistence. |
 | `report.py` | Excel report generation. |
 | `app.py` | Streamlit UI (no business logic beyond orchestration). |
@@ -236,6 +239,8 @@ git push                         # 5. push
 | 2026-11-12 | Download images through the app with a Kobo API token | Kobo attachment URLs return 404 without authentication |
 | 2026-11-12 | Autosave evaluations as JSON per (form, export) pair | Never lose work; resume across sessions |
 | 2026-11-12 | Field data and tokens are git-ignored | Data protection |
+| 2026-11-12 | Sign in with Kobo username/password via `/token/` (password used once, key in memory only) | Reviewers know passwords, not API keys (spec 001) |
+| 2026-11-12 | Send the API key only to the signed-in server host | Prevent token leakage |
 | 2026-11-12 | No AI/bot contributors; Dependabot disabled | Owner requirement: only humans appear as contributors |
 | 2026-11-12 | Adopt GitHub Spec Kit (Claude integration, Python scripts) | Spec-driven development with Claude Code; principles mirrored in `.specify/memory/constitution.md` |
 | 2026-11-12 | Disable Claude attribution in `.claude/settings.json` | Enforce the human-authorship rule at tool level |
@@ -245,7 +250,8 @@ git push                         # 5. push
 
 - [x] Scaffold the project and publish the private repository.
 - [x] XLSForm parser, export scanner, evaluation store, Excel report and Streamlit UI.
-- [ ] Verify image download end-to-end with a real Kobo API token (all exports).
+- [x] Sign in to Kobo from the UI (spec `specs/001-kobo-account-login`).
+- [ ] Verify sign-in and image download end-to-end with a real Kobo account (all exports).
 - [ ] Protect `main` (require PR + green CI).
 - [ ] Import a previous Excel report to resume or merge evaluations from several evaluators.
 - [ ] Optional gallery/grid view and keyboard shortcuts for faster review.
@@ -253,7 +259,8 @@ git push                         # 5. push
 
 ## 13. Local configuration (not tracked)
 
-- Copy `.env.example` to `.env` and set `KOBO_API_TOKEN` (Kobo → Account settings →
-  Security → API key). `.env` is git-ignored.
+- Optional: copy `.env.example` to `.env` and set `KOBO_API_TOKEN` (Kobo → Account settings →
+  Security → API key) to sign in automatically; otherwise sign in from the sidebar.
+  `.env` is git-ignored.
 - Git identity for this repository is the owner's GitHub identity
   (`Jason Alejandro Castaño`, email linked to `jasonCastano`).

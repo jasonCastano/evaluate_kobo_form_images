@@ -61,7 +61,8 @@ properly. **Evaluate Kobo Form Images** is a local web app that:
 | Any XLSForm | Parses `survey`/`settings`; groups, repeats and multilingual labels. |
 | Any Kobo export | All sheets; XML-name or label headers; group prefixes; duplicate labels resolved in form order. |
 | No image lost | Image columns that do not match the form are still listed and flagged. |
-| Authenticated download | Uses your Kobo API token; EXIF rotation, resizing, disk cache and prefetch of the next images. |
+| Kobo sign-in | Sign in from the sidebar with your Kobo username & password or an API key; the key is kept in memory only and sent only to your Kobo server. |
+| Fast image display | EXIF rotation, resizing, disk cache and prefetch of the next images. |
 | Fast review | Filters by question, status and enumerator; *Save & next*; *Next pending*. |
 | Autosave & resume | Every decision is saved immediately to `evaluations/<form>__<export>.json`. |
 | Traceable report | Excel with `Evaluations`, `Summary by question` and `Metadata` sheets. |
@@ -85,8 +86,9 @@ properly. **Evaluate Kobo Form Images** is a local web app that:
 - [Python 3.13+](https://www.python.org/downloads/)
 - [`uv`](https://docs.astral.sh/uv/getting-started/installation/)
 - [Git](https://git-scm.com/) and (optionally) GNU `make`
-- A **KoboToolbox API token** with access to the project (Kobo → *Account settings* →
-  *Security* → *API key*). Kobo attachment links are private and return *404* without it.
+- A **KoboToolbox account** with access to the project. Kobo attachment links are private,
+  so you sign in from the app (username & password, or an API key from Kobo →
+  *Account settings* → *Security* if you use SSO or two-factor authentication).
 
 ### Installation
 
@@ -95,7 +97,7 @@ git clone https://github.com/jasonCastano/evaluate_kobo_form_images.git
 cd evaluate_kobo_form_images
 
 make dev                   # = uv sync + pre-commit install
-cp .env.example .env       # then set KOBO_API_TOKEN in .env
+cp .env.example .env       # optional: set KOBO_API_TOKEN to sign in automatically
 ```
 
 > 💡 The `Makefile` forces a project-local `.venv`. If you run `uv` directly and your
@@ -116,7 +118,9 @@ The app opens at <http://localhost:8501>.
    (subfolders allowed). Both folders are git-ignored. You can also upload files directly
    from the sidebar.
 2. In the sidebar select the **form**, then the matching **data export**, type your
-   **evaluator name** and (if not in `.env`) the **Kobo API token**.
+   **evaluator name**, and sign in under **3. Kobo account** (the server is pre-selected
+   from the image links; use the *API key* tab for SSO / two-factor accounts). Your
+   password is used once to obtain your API key and is never stored.
 3. Use the filters (question, status, submitted by) and the navigation buttons to move
    through the images.
 4. For each image choose **Valid** or **Invalid**; for *Invalid* tick at least one reason;
@@ -154,7 +158,8 @@ evaluate_kobo_form_images/
 │   ├── cli.py            # `evaluate-kobo-images` launcher
 │   ├── xlsform.py        # XLSForm parser (image questions)
 │   ├── kobo_export.py    # Kobo export scanner (one record per image)
-│   ├── kobo_client.py    # authenticated image download + cache
+│   ├── kobo_auth.py      # Kobo sign-in (password / API key) + in-memory session
+│   ├── kobo_client.py    # host-scoped authenticated image download + cache
 │   ├── evaluation.py     # evaluation model + autosave store
 │   └── report.py         # Excel report
 ├── tests/                # pytest suite (synthetic fixtures)

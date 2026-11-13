@@ -9,6 +9,7 @@ import contextlib
 import hashlib
 import io
 import os
+from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from pathlib import Path
@@ -16,14 +17,27 @@ from pathlib import Path
 import streamlit as st
 from dotenv import load_dotenv
 
-from evaluate_kobo_form_images import __version__
+from evaluate_kobo_form_images import __version__, kobo_auth
 from evaluate_kobo_form_images.evaluation import (
     Evaluation,
     EvaluationStore,
     InvalidReason,
     Verdict,
 )
-from evaluate_kobo_form_images.kobo_client import ImageFetchError, KoboImageClient
+from evaluate_kobo_form_images.kobo_auth import (
+    EU_SERVER,
+    GLOBAL_SERVER,
+    AuthError,
+    KoboServer,
+    KoboSession,
+    SignInMethod,
+)
+from evaluate_kobo_form_images.kobo_client import (
+    EXPIRED_MESSAGE,
+    FetchFailure,
+    ImageFetchError,
+    KoboImageClient,
+)
 from evaluate_kobo_form_images.kobo_export import ExportScan, ImageRecord, scan_export
 from evaluate_kobo_form_images.report import PENDING, build_report
 from evaluate_kobo_form_images.xlsform import KoboForm, parse_xlsform
@@ -36,6 +50,17 @@ EVALUATIONS_DIR = Path(os.getenv("EVALUATIONS_DIR", "evaluations"))
 CACHE_DIR = Path(os.getenv("IMAGE_CACHE_DIR", ".cache/images"))
 PREFETCH_AHEAD = 3
 STATUS_FILTERS = ("All", PENDING, Verdict.VALID.value, Verdict.INVALID.value)
+CUSTOM_SERVER = "Custom…"
+SERVER_OPTIONS = {GLOBAL_SERVER.label: GLOBAL_SERVER, EU_SERVER.label: EU_SERVER}
+API_KEY_HELP = (
+    "Use an API key if you sign in to Kobo with your organization (SSO) or with two-factor "
+    "authentication. Find it in Kobo > Account settings > Security."
+)
+# Session-state keys (memory only, per browser tab; never persisted).
+SESSION_KEY = "kobo_session"
+CLIENT_KEY = "kobo_client"
+ERROR_KEY = "kobo_auth_error"
+ENV_ATTEMPT_KEY = "kobo_env_attempted"
 
 
 # --------------------------------------------------------------------------- loaders
@@ -50,12 +75,6 @@ def load_export(content: bytes, file_name: str, _form: KoboForm, form_key: str) 
     """Scan a Kobo data export (cached by content and form)."""
     del form_key  # only part of the cache key
     return scan_export(io.BytesIO(content), _form, file_name=file_name)
-
-
-@st.cache_resource
-def get_client(token: str) -> KoboImageClient:
-    """Return one image client per token."""
-    return KoboImageClient(token=token, cache_dir=CACHE_DIR)
 
 
 @st.cache_resource
@@ -87,37 +106,164 @@ def _pick_file(label: str, directory: Path, key: str) -> tuple[bytes, str] | Non
     return path.read_bytes(), path.name
 
 
+# --------------------------------------------------------------------------- Kobo account
+def current_session() -> KoboSession | None:
+    """Return the signed-in Kobo session of this browser tab, if any."""
+    return st.session_state.get(SESSION_KEY)
+
+
+def image_client() -> KoboImageClient:
+    """Return the image client bound to the current session (rebuilt when it changes)."""
+    session = current_session()
+    client: KoboImageClient | None = st.session_state.get(CLIENT_KEY)
+    if client is None or client.kobo_session is not session:
+        client = KoboImageClient(session, CACHE_DIR)
+        st.session_state[CLIENT_KEY] = client
+    return client
+
+
+def sign_out(message: str | None = None) -> None:
+    """Forget the Kobo session and its client (evaluations and cache are kept)."""
+    for key in (SESSION_KEY, CLIENT_KEY, ERROR_KEY):
+        st.session_state.pop(key, None)
+    if message:
+        st.session_state[ERROR_KEY] = message
+
+
+def _store_session(session: KoboSession) -> None:
+    st.session_state[SESSION_KEY] = session
+    st.session_state.pop(ERROR_KEY, None)
+    if not st.session_state.get("evaluator"):
+        st.session_state["evaluator"] = session.username
+
+
+def _choose_server(detected: KoboServer) -> KoboServer | None:
+    """Server selector pre-selected from the image links; ``None`` if the custom URL is bad."""
+    options = [*SERVER_OPTIONS, CUSTOM_SERVER]
+    default = options.index(detected.label) if detected.label in SERVER_OPTIONS else 2
+    choice = st.selectbox("Server", options, index=default, key="kobo_server_choice")
+    if choice != CUSTOM_SERVER:
+        return SERVER_OPTIONS[choice]
+    url = st.text_input(
+        "Server URL",
+        value="" if detected.label in SERVER_OPTIONS else detected.base_url,
+        placeholder="https://kobo.example.org",
+        key="kobo_server_url",
+    )
+    try:
+        return KoboServer.from_url(url)
+    except AuthError as exc:
+        st.error(exc.message)
+        return None
+
+
+def _attempt(sign_in: Callable[[], KoboSession]) -> None:
+    """Run a sign-in inside a widget callback (the script reruns right after)."""
+    try:
+        session = sign_in()
+    except AuthError as exc:
+        st.session_state[ERROR_KEY] = exc.message
+        return
+    _store_session(session)
+
+
+def _submit_password(server: KoboServer | None) -> None:
+    """Form callback: read and immediately wipe the password, then sign in."""
+    username = st.session_state.get("kobo_username", "")
+    password = st.session_state.get("kobo_password", "")
+    st.session_state["kobo_password"] = ""
+    if server is not None:
+        _attempt(lambda: kobo_auth.sign_in_with_password(server, username, password))
+
+
+def _submit_api_key(server: KoboServer | None) -> None:
+    """Form callback: read and immediately wipe the API key, then sign in."""
+    api_key = st.session_state.get("kobo_api_key", "")
+    st.session_state["kobo_api_key"] = ""
+    if server is not None:
+        _attempt(lambda: kobo_auth.sign_in_with_token(server, api_key, SignInMethod.API_KEY))
+
+
+def _auto_sign_in(server: KoboServer) -> None:
+    """Sign in once with ``KOBO_API_TOKEN`` from the environment, if configured."""
+    token = os.getenv("KOBO_API_TOKEN", "").strip()
+    if not token or current_session() is not None or st.session_state.get(ENV_ATTEMPT_KEY):
+        return
+    st.session_state[ENV_ATTEMPT_KEY] = True
+    try:
+        session = kobo_auth.sign_in_with_token(server, token, SignInMethod.ENVIRONMENT)
+    except AuthError as exc:
+        st.session_state[ERROR_KEY] = exc.message
+        return
+    _store_session(session)
+
+
+def render_account(image_urls: list[str]) -> None:
+    """Sidebar panel to sign in to Kobo (username/password or API key) or sign out."""
+    st.header("3. Kobo account")
+    detected = kobo_auth.detect_server(image_urls)
+    _auto_sign_in(detected)
+    session = current_session()
+    if session is not None:
+        st.success(f"Signed in as **{session.username}** on {session.server.label}")
+        st.caption(f"via {session.method.value} · {session.signed_in_at[11:16]} UTC")
+        if st.button("Sign out", key="kobo_sign_out", width="stretch"):
+            sign_out()
+            st.rerun()
+        if image_urls and detected != session.server:
+            host = detected.base_url.split("://", 1)[-1]
+            st.warning(f"The images in this export are hosted on {host}.")
+        return
+
+    server = _choose_server(detected)
+    password_tab, key_tab = st.tabs(["Username & password", "API key"])
+    with password_tab, st.form("kobo_password_form"):
+        st.text_input("Username", key="kobo_username")
+        st.text_input("Password", type="password", key="kobo_password")
+        st.form_submit_button(
+            "Sign in",
+            width="stretch",
+            key="kobo_password_submit",
+            on_click=_submit_password,
+            args=(server,),
+        )
+    with key_tab, st.form("kobo_key_form"):
+        st.text_input("API key", type="password", key="kobo_api_key")
+        st.form_submit_button(
+            "Sign in",
+            width="stretch",
+            key="kobo_key_submit",
+            on_click=_submit_api_key,
+            args=(server,),
+        )
+    st.caption(API_KEY_HELP)
+    if st.session_state.get(ERROR_KEY):
+        st.error(st.session_state[ERROR_KEY])
+
+
 # --------------------------------------------------------------------------- sidebar
-def sidebar() -> tuple[KoboForm | None, ExportScan | None, str, str]:
-    """Render the sidebar inputs and return the loaded form, export, token and evaluator."""
+def sidebar() -> tuple[KoboForm | None, ExportScan | None, str]:
+    """Render the sidebar inputs and return the loaded form, export and evaluator name."""
+    form = scan = None
     with st.sidebar:
         st.header("1. Kobo form")
         form_file = _pick_file("Form (XLSForm)", FORMS_DIR, "form")
         st.header("2. Collected data")
         data_file = _pick_file("Data export", DATA_DIR, "data")
-        st.header("3. Session")
+        if form_file:
+            try:
+                form = load_form(*form_file)
+            except Exception as exc:
+                st.error(f"Could not read the form: {exc}")
+        if form_file and form and data_file:
+            try:
+                form_key = hashlib.sha1(form_file[0]).hexdigest()
+                scan = load_export(data_file[0], data_file[1], form, form_key)
+            except Exception as exc:
+                st.error(f"Could not read the data export: {exc}")
+        render_account([r.image_url for r in scan.records] if scan else [])
         evaluator = st.text_input("Evaluator name", key="evaluator")
-        token = st.text_input(
-            "Kobo API token",
-            value=os.getenv("KOBO_API_TOKEN", ""),
-            type="password",
-            help="Needed to download images. Kobo > Account settings > Security > API key. "
-            "It can also be set as KOBO_API_TOKEN in a local .env file.",
-        )
-
-    form = scan = None
-    if form_file:
-        try:
-            form = load_form(*form_file)
-        except Exception as exc:
-            st.error(f"Could not read the form: {exc}")
-    if form_file and form and data_file:
-        try:
-            form_key = hashlib.sha1(form_file[0]).hexdigest()
-            scan = load_export(data_file[0], data_file[1], form, form_key)
-        except Exception as exc:
-            st.error(f"Could not read the data export: {exc}")
-    return form, scan, token, evaluator
+    return form, scan, evaluator
 
 
 # --------------------------------------------------------------------------- main view
@@ -215,7 +361,17 @@ def render_image(record: ImageRecord, client: KoboImageClient, upcoming: list[st
             data = client.fetch(record.image_url)
         st.image(data, width="stretch")
     except ImageFetchError as exc:
-        st.error(str(exc))
+        if exc.reason is FetchFailure.ACCESS_EXPIRED:
+            sign_out(EXPIRED_MESSAGE)
+            st.rerun()
+        elif exc.reason is FetchFailure.NOT_SIGNED_IN:
+            st.info(str(exc))
+        else:
+            st.error(str(exc))
+            if exc.reason is FetchFailure.UNREACHABLE and st.button(
+                "Retry", key=f"retry_{record.key}"
+            ):
+                st.rerun()
     st.markdown(f"[Open original attachment in Kobo]({record.image_url})")
     executor = get_executor()
     for url in upcoming:
@@ -343,7 +499,7 @@ def main() -> None:
     """Application entry point."""
     st.set_page_config(page_title="Kobo Image Evaluator", page_icon="🖼️", layout="wide")
     st.title("🖼️ Kobo Image Evaluator")
-    form, scan, token, evaluator = sidebar()
+    form, scan, evaluator = sidebar()
     st.sidebar.caption(f"v{__version__}")
 
     if form is None or scan is None:
@@ -374,7 +530,7 @@ def main() -> None:
     record = records[pos]
     st.caption(f"Image {pos + 1} of {len(records)} in the current selection")
 
-    client = get_client(token)
+    client = image_client()
     upcoming = [r.image_url for r in records[pos + 1 : pos + 1 + PREFETCH_AHEAD]]
     left, right = st.columns([3, 2])
     with left:
