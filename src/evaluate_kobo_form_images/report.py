@@ -3,9 +3,14 @@
 from __future__ import annotations
 
 import io
+import os
+import re
 from collections import Counter
 from collections.abc import Iterable, Mapping
+from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import TimeoutError as FutureTimeout
 from datetime import UTC, datetime
+from pathlib import Path
 
 from openpyxl import Workbook
 from openpyxl.styles import Font, PatternFill
@@ -17,6 +22,9 @@ from evaluate_kobo_form_images.evaluation import Evaluation, InvalidReason, Verd
 from evaluate_kobo_form_images.kobo_export import ImageRecord
 
 PENDING = "Pending"
+EVALUATIONS_SHEET = "Evaluations"
+METADATA_SHEET = "Metadata"
+REASON_COLUMN_PREFIX = "Reason: "
 
 EVALUATION_COLUMNS: list[str] = [
     "Form file",
@@ -40,7 +48,7 @@ EVALUATION_COLUMNS: list[str] = [
     "Image URL",
     "Image key",
     "Evaluation status",
-    *(f"Reason: {reason.value}" for reason in InvalidReason),
+    *(f"{REASON_COLUMN_PREFIX}{reason.value}" for reason in InvalidReason),
     "Invalid reasons",
     "Comments",
     "Evaluator",
@@ -117,7 +125,7 @@ def build_report(
     workbook = Workbook()
     sheet = workbook.active
     assert isinstance(sheet, Worksheet)
-    sheet.title = "Evaluations"
+    sheet.title = EVALUATIONS_SHEET
     sheet.append(EVALUATION_COLUMNS)
     status_col = EVALUATION_COLUMNS.index("Evaluation status") + 1
     url_col = EVALUATION_COLUMNS.index("Image URL") + 1
@@ -160,7 +168,7 @@ def build_report(
     _style_header(summary_sheet, {1: 30, 2: 45})
 
     first = records[0] if records else None
-    meta = workbook.create_sheet("Metadata")
+    meta = workbook.create_sheet(METADATA_SHEET)
     meta.append(["Field", "Value"])
     for field_name, value in (
         ("Form file", first.form_file if first else ""),
@@ -178,3 +186,81 @@ def build_report(
     buffer = io.BytesIO()
     workbook.save(buffer)
     return buffer.getvalue()
+
+
+# --------------------------------------------------------------------------- local save
+_UNSAFE = re.compile(r"[^A-Za-z0-9._-]")
+_REASON_PERMISSION = "Permission denied (is the file or folder open in another program?)"
+_REASON_FOLDER = "The folder path is not valid or the drive is not available"
+_REASON_TIMEOUT = "Saving took too long — the folder may be on a slow or offline drive."
+
+
+class ReportSaveError(Exception):
+    """The report could not be written; ``reason`` is plain English for the evaluator."""
+
+    def __init__(self, path: Path, reason: str) -> None:
+        super().__init__(f"Could not save the report to {path}: {reason}")
+        self.path = path
+        self.reason = reason
+
+
+def report_file_name(form_file: str, now: datetime) -> str:
+    """Return ``image_evaluation__<form stem>__YYYYMMDD-HHMMSS.xlsx`` (filesystem-safe)."""
+    stem = _UNSAFE.sub("_", Path(form_file).stem)
+    return f"image_evaluation__{stem}__{now:%Y%m%d-%H%M%S}.xlsx"
+
+
+def _write_atomic(tmp: Path, final: Path, content: bytes) -> None:
+    tmp.write_bytes(content)
+    os.replace(tmp, final)
+
+
+def _free_path(folder: Path, name: str) -> Path:
+    candidate = folder / name
+    stem, suffix = candidate.stem, candidate.suffix
+    counter = 2
+    while candidate.exists():
+        candidate = folder / f"{stem}-{counter}{suffix}"
+        counter += 1
+    return candidate
+
+
+def save_report(
+    content: bytes,
+    folder: str | Path,
+    form_file: str,
+    *,
+    now: datetime | None = None,
+    timeout: float = 30.0,
+) -> Path:
+    """Write the report into ``folder`` (created if needed) and return its absolute path.
+
+    A new file is always created (``-2``, ``-3`` … suffixes); existing reports are never
+    overwritten. The write is atomic (temporary file + rename) and bounded by ``timeout``.
+
+    Raises:
+        ReportSaveError: with a plain-English ``reason``.
+    """
+    target = Path(os.path.expanduser(str(folder))).resolve()
+    try:
+        target.mkdir(parents=True, exist_ok=True)
+    except PermissionError:
+        raise ReportSaveError(target, _REASON_PERMISSION) from None
+    except OSError as exc:
+        raise ReportSaveError(target, f"{_REASON_FOLDER} ({exc.strerror or exc}).") from None
+    final = _free_path(target, report_file_name(form_file, now or datetime.now()))
+    tmp = final.with_name(f"{final.name}.tmp")
+    executor = ThreadPoolExecutor(max_workers=1)
+    try:
+        executor.submit(_write_atomic, tmp, final, content).result(timeout=timeout)
+    except FutureTimeout:
+        raise ReportSaveError(final, _REASON_TIMEOUT) from None
+    except PermissionError:
+        tmp.unlink(missing_ok=True)
+        raise ReportSaveError(final, _REASON_PERMISSION) from None
+    except OSError as exc:
+        tmp.unlink(missing_ok=True)
+        raise ReportSaveError(final, f"The file system reported: {exc.strerror or exc}.") from None
+    finally:
+        executor.shutdown(wait=False)
+    return final

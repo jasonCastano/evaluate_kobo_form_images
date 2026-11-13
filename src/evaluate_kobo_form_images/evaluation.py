@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import re
+from collections.abc import Iterable
 from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
 from enum import StrEnum
@@ -56,6 +57,25 @@ class Evaluation:
         return data
 
 
+def parse_timestamp(value: str) -> datetime:
+    """Parse an ISO-8601 timestamp; naive values are taken as UTC.
+
+    Raises:
+        ValueError: if ``value`` is not ISO-8601.
+    """
+    moment = datetime.fromisoformat(value.strip())
+    return moment if moment.tzinfo else moment.replace(tzinfo=UTC)
+
+
+@dataclass(frozen=True)
+class MergeResult:
+    """Outcome of :meth:`EvaluationStore.merge`."""
+
+    added: int
+    updated: int
+    unchanged: int
+
+
 def _slug(text: str) -> str:
     return re.sub(r"[^A-Za-z0-9._-]+", "_", text).strip("_") or "session"
 
@@ -104,3 +124,26 @@ class EvaluationStore:
     def get(self, record_key: str) -> Evaluation | None:
         """Return the evaluation of a record, if any."""
         return self.evaluations.get(record_key)
+
+    def merge(self, evaluations: Iterable[Evaluation]) -> MergeResult:
+        """Merge evaluations without ever deleting: add absent ones, replace strictly newer.
+
+        Identical evaluations, and incoming ones that are older or as old as the stored one,
+        leave the store unchanged (local wins ties). Saves once, only if something changed.
+        """
+        added = updated = unchanged = 0
+        for incoming in evaluations:
+            current = self.evaluations.get(incoming.record_key)
+            if current is None:
+                self.evaluations[incoming.record_key] = incoming
+                added += 1
+            elif current.to_dict() != incoming.to_dict() and parse_timestamp(
+                incoming.evaluated_at
+            ) > parse_timestamp(current.evaluated_at):
+                self.evaluations[incoming.record_key] = incoming
+                updated += 1
+            else:
+                unchanged += 1
+        if added or updated:
+            self.save()
+        return MergeResult(added=added, updated=updated, unchanged=unchanged)
