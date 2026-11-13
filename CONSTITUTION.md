@@ -140,6 +140,12 @@ question and image.
 
 ## 6. Repository structure
 
+Published to `main`: `src/`, `tests/` (except `tests/test_release_to_main.py`),
+`.github/workflows/ci.yml`, `.streamlit/config.toml`, `pyproject.toml`, `uv.lock`,
+`.python-version`, `.env.example`, `.gitignore`, `.gitattributes`, `.editorconfig`,
+`.pre-commit-config.yaml`, `Makefile`, `LICENSE`, `README.md`. Everything else exists on
+`develop` only.
+
 ```text
 evaluate_kobo_form_images/
 ├── src/evaluate_kobo_form_images/   # package (src-layout) — see §5
@@ -157,6 +163,8 @@ evaluate_kobo_form_images/
 ├── exports/                         # LOCAL ONLY (git-ignored): saved Excel reports
 ├── .env.example                     # configuration template (copy to .env)
 ├── AGENTS.md                        # context for LLM agents
+├── scripts/release_to_main.py       # develop only: publishes the allowlist to main
+├── DEVELOPMENT.md                   # develop only: branch model + release procedure
 ├── CONSTITUTION.md                  # this file — single source of truth
 ├── README.md                        # public entry point
 ├── CONTRIBUTING.md                  # contribution guide
@@ -209,8 +217,17 @@ evaluate_kobo_form_images/
 ## 9. Repository and Git
 
 - **Remote:** `https://github.com/jasonCastano/evaluate_kobo_form_images.git` (private)
-- **Main branch:** `main`, integrated through Pull Requests.
-- **Branches:** `feat/...`, `fix/...`, `docs/...`, `refactor/...`, `test/...`, `chore/...`.
+- **`main` (default, user-facing):** contains only the published files (application `src/`,
+  `tests/`, CI workflow, install/run files, `LICENSE`, `README.md`). It is updated **only** through
+  `release/*` pull requests created by `scripts/release_to_main.py` (allowlist snapshot of
+  `develop`). Never merge `develop` into `main`.
+- **`develop` (full project):** specifications, governance, assistant configuration, scripts and
+  docs. All feature branches start from `develop` and their PRs target `develop`
+  (`gh pr create --base develop`).
+- **Branches:** Spec Kit `NNN-feature-name`, `feat/...`, `fix/...`, `docs/...`, `refactor/...`,
+  `test/...`, `chore/...`; `release/<YYYYMMDD-HHMM>` for releases.
+- **Never:** direct pushes or force-pushes to `main` or `develop`; deleting the base branch of an
+  open PR. Release procedure: [`DEVELOPMENT.md`](./DEVELOPMENT.md).
 
 ## 10. Spec-driven development (Spec Kit + Claude Code)
 
@@ -224,11 +241,12 @@ attribution for everyone using the repository.
 ## 10.1 Daily workflow (commit + push)
 
 ```bash
+git switch develop; git pull --ff-only; git switch -c <branch>   # 0. start from develop
 git status                       # 1. review changes
 make check                       # 2. lint + format + types + tests
 git add -A                       # 3. stage
 git commit -m "type: message"    # 4. commit (hooks run automatically)
-git push                         # 5. push
+git push                         # 5. push, then: gh pr create --base develop
 ```
 
 ## 11. Technical decision log
@@ -245,6 +263,9 @@ git push                         # 5. push
 | 2026-11-12 | Autosave evaluations as JSON per (form, export) pair | Never lose work; resume across sessions |
 | 2026-11-13 | Save reports server-side to a chosen folder instead of browser download | Browser download ignored the intended folder (feature 002) |
 | 2026-11-13 | Resume by importing a previous report; newer evaluation wins, never delete | Multi-session / multi-evaluator review (feature 002) |
+| 2026-11-13 | Split `main` (user-only) and `develop` (full project); publish with an allowlist snapshot script | Users need a clean `main`; developers keep specs and governance (feature 004) |
+| 2026-11-13 | Keep tests, CI, pre-commit and Makefile on `main` | Released code stays verified (feature 004, Q1 = C) |
+| 2026-11-13 | Do not rewrite `main` history when removing developer files | No force-push; private repository (feature 004, Q2 = A) |
 | 2026-11-13 | Merge stacked PRs #1 and #2 with merge commits (not squash) | Avoid rewriting a published branch; keeps human-authored commits (feature 003). Lesson: never delete the base branch of an open stacked PR (it closes the PR); retarget it to `main` first |
 | 2026-11-12 | Field data and tokens are git-ignored | Data protection |
 | 2026-11-12 | Sign in with Kobo username/password via `/token/` (password used once, key in memory only) | Reviewers know passwords, not API keys (spec 001) |
@@ -263,6 +284,7 @@ git push                         # 5. push
 - [ ] Protect `main` (require PR + green CI).
 - [x] Import a previous Excel report to resume or merge evaluations (spec `specs/002-report-export-resume`).
 - [x] Detailed README user guide and "how it works" (spec `specs/003-readme-user-guide`).
+- [x] User-only `main` + full `develop` with a release script (spec `specs/004-clean-user-main`).
 - [ ] Optional gallery/grid view and keyboard shortcuts for faster review.
 - [ ] Spike: automatic brightness / blur scores to pre-sort images.
 

@@ -1,7 +1,8 @@
 <!--
 Sync Impact Report
-- Version: (template) → 1.0.0
-- Principles defined: I–VIII (initial ratification, derived from /CONSTITUTION.md)
+- Version: 1.0.0 → 1.1.0 (2026-11-13)
+- Modified section: Development Workflow (branch model: develop / user-only main, feature 004)
+- Principles defined: I–VIII (unchanged)
 - Added sections: Technology & Data Constraints, Development Workflow, Governance
 - Templates requiring updates: none (plan/spec/tasks templates read this file as-is)
 - Follow-up TODOs: none
@@ -79,8 +80,10 @@ identities. Dependabot and any bot that commits or opens PRs stay disabled; CI n
 1. Spec-driven flow for new features: `/speckit-specify` → (`/speckit-clarify`) →
    `/speckit-plan` → `/speckit-tasks` → (`/speckit-analyze`) → `/speckit-implement`.
    Feature artifacts live in `specs/NNN-feature-name/`.
-2. Work on a branch (`feat/…`, `fix/…`, `docs/…`, or Spec Kit `NNN-feature-name`),
-   Conventional Commits in imperative mood, PR into `main` with green CI, Squash & Merge.
+2. Work on a branch created from `develop` (`feat/…`, `fix/…`, `docs/…`, or Spec Kit
+   `NNN-feature-name`), Conventional Commits in imperative mood, PR into `develop` with green
+   CI, Squash & Merge. `main` is user-only and receives allowlisted releases only
+   (`scripts/release_to_main.py`, see `/DEVELOPMENT.md`).
 3. Any architectural, technology or process change updates `/CONSTITUTION.md` (and this
    file when principles are affected) in the same commit.
 
@@ -92,4 +95,4 @@ plan's Complexity Tracking. Amendments: document the change and rationale in the
 `/CONSTITUTION.md` decision log, bump this version (MAJOR: principle removed/redefined;
 MINOR: principle/section added; PATCH: clarification), and update both files together.
 
-**Version**: 1.0.0 | **Ratified**: 2026-11-12 | **Last Amended**: 2026-11-12
+**Version**: 1.1.0 | **Ratified**: 2026-11-12 | **Last Amended**: 2026-11-13

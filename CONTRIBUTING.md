@@ -19,7 +19,9 @@ make run                 # start the app
 
 ## 2. Branches
 
-Create a branch from `main` with a type prefix:
+Create a branch from **`develop`** (`git switch develop; git pull --ff-only`) with a type
+prefix (or the Spec Kit `NNN-feature-name`). `main` is the user-facing branch and only receives
+releases (see [`DEVELOPMENT.md`](./DEVELOPMENT.md)).
 
 | Prefix | Use |
 |--------|-----|
@@ -53,6 +55,8 @@ add `Co-Authored-By:` trailers for AI assistants or bots, and do not use bot ide
 ## 5. Pull Requests
 
 1. Run `make check` locally.
-2. Push the branch and open a PR using the template.
+2. Push the branch and open a PR **to `develop`** using the template
+   (`gh pr create --base develop`).
 3. Update `CONSTITUTION.md` in the same PR if you change architecture, technology or process.
 4. CI must be green; merge with **Squash & Merge** and delete the branch.
+5. Releases to `main` are done by the maintainer with `scripts/release_to_main.py`.
