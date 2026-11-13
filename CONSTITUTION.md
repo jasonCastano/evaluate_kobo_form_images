@@ -53,7 +53,10 @@ question and image.
 - Evaluation per image: **Valid / Invalid**; when invalid, one or more reasons from a closed
   list plus free-text comments.
 - Autosave and resume of evaluations per *(form, data export)* pair.
-- Excel report (`Evaluations`, `Summary by question`, `Metadata` sheets).
+- Excel report (`Evaluations`, `Summary by question`, `Metadata` sheets) saved directly to a
+  local folder chosen in the UI (default `exports/`), never overwriting earlier reports.
+- Resuming work by importing a previously exported report (merge: newer evaluation wins,
+  nothing deleted; viewer continues on the next pending image).
 
 ### Out of scope (for now)
 
@@ -126,13 +129,14 @@ question and image.
 | `kobo_auth.py` | Kobo servers, sign-in (password → API key via `/token/`, key check via `/me/`), in-memory `KoboSession`. |
 | `kobo_client.py` | Host-scoped authenticated attachment download with typed failures, display JPEG conversion, disk cache. |
 | `evaluation.py` | `Verdict`, `InvalidReason`, `Evaluation` validation and `EvaluationStore` persistence. |
-| `report.py` | Excel report generation. |
+| `report.py` | Excel report generation and local saving (`save_report`: timestamped name, atomic write, timeout). |
+| `report_import.py` | Import of a previous report: validation, matching (key, then URL + question), merge, resume position. |
 | `app.py` | Streamlit UI (no business logic beyond orchestration). |
 | `cli.py` | `evaluate-kobo-images` console entry point (launches Streamlit). |
 
 **Configuration** (environment or `.env`, see `.env.example`): `KOBO_API_TOKEN`,
 `KOBO_FORMS_DIR` (default `forms`), `KOBO_DATA_DIR` (`data`), `EVALUATIONS_DIR`
-(`evaluations`), `IMAGE_CACHE_DIR` (`.cache/images`).
+(`evaluations`), `IMAGE_CACHE_DIR` (`.cache/images`), `REPORTS_DIR` (`exports`).
 
 ## 6. Repository structure
 
@@ -150,6 +154,7 @@ evaluate_kobo_form_images/
 ├── CLAUDE.md                        # instructions for Claude Code
 ├── forms/  data/                    # LOCAL ONLY (git-ignored): Kobo forms and exports
 ├── evaluations/  .cache/            # LOCAL ONLY (git-ignored): autosave and image cache
+├── exports/                         # LOCAL ONLY (git-ignored): saved Excel reports
 ├── .env.example                     # configuration template (copy to .env)
 ├── AGENTS.md                        # context for LLM agents
 ├── CONSTITUTION.md                  # this file — single source of truth
@@ -238,6 +243,8 @@ git push                         # 5. push
 | 2026-11-12 | Match `_URL` columns by name **or** label | Kobo exports may use XML names or labels as headers |
 | 2026-11-12 | Download images through the app with a Kobo API token | Kobo attachment URLs return 404 without authentication |
 | 2026-11-12 | Autosave evaluations as JSON per (form, export) pair | Never lose work; resume across sessions |
+| 2026-11-13 | Save reports server-side to a chosen folder instead of browser download | Browser download ignored the intended folder (feature 002) |
+| 2026-11-13 | Resume by importing a previous report; newer evaluation wins, never delete | Multi-session / multi-evaluator review (feature 002) |
 | 2026-11-12 | Field data and tokens are git-ignored | Data protection |
 | 2026-11-12 | Sign in with Kobo username/password via `/token/` (password used once, key in memory only) | Reviewers know passwords, not API keys (spec 001) |
 | 2026-11-12 | Send the API key only to the signed-in server host | Prevent token leakage |
@@ -253,7 +260,7 @@ git push                         # 5. push
 - [x] Sign in to Kobo from the UI (spec `specs/001-kobo-account-login`).
 - [ ] Verify sign-in and image download end-to-end with a real Kobo account (all exports).
 - [ ] Protect `main` (require PR + green CI).
-- [ ] Import a previous Excel report to resume or merge evaluations from several evaluators.
+- [x] Import a previous Excel report to resume or merge evaluations (spec `specs/002-report-export-resume`).
 - [ ] Optional gallery/grid view and keyboard shortcuts for faster review.
 - [ ] Spike: automatic brightness / blur scores to pre-sort images.
 

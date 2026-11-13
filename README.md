@@ -65,7 +65,8 @@ properly. **Evaluate Kobo Form Images** is a local web app that:
 | Fast image display | EXIF rotation, resizing, disk cache and prefetch of the next images. |
 | Fast review | Filters by question, status and enumerator; *Save & next*; *Next pending*. |
 | Autosave & resume | Every decision is saved immediately to `evaluations/<form>__<export>.json`. |
-| Traceable report | Excel with `Evaluations`, `Summary by question` and `Metadata` sheets. |
+| Traceable report | Excel with `Evaluations`, `Summary by question` and `Metadata` sheets, saved directly to a local folder of your choice. |
+| Resume from a report | Upload a previously exported report to restore its evaluations (newer evaluation wins, nothing is deleted) and continue on the next pending image. |
 
 ## 🛠️ Tech stack
 
@@ -125,7 +126,10 @@ The app opens at <http://localhost:8501>.
    through the images.
 4. For each image choose **Valid** or **Invalid**; for *Invalid* tick at least one reason;
    add comments if needed; press **Save & next**.
-5. In the sidebar, **Build Excel report** → **Download Excel**.
+5. Under **4. Report** choose the folder and press **Export report**; the file is saved
+   there (no browser download) and its full path is shown. To continue earlier work, upload
+   a previous report and press **Import report**: its evaluations are restored and the
+   viewer jumps to the next pending image.
 
 Evaluations are autosaved; reopening the same form and export resumes where you left off.
 
@@ -136,6 +140,12 @@ Evaluations are autosaved; reopening the same form and export resumes where you 
 | `Evaluations` | One row per image: form file and title, data file, data sheet, Excel row, submission ID/UUID/time, submitted by, Kobo validation status, repeat and parent index, question name/label/group, export column, image file name, image URL (hyperlink), image key, **evaluation status** (`Valid`/`Invalid`/`Pending`), one *Yes* column per reason, reasons text, comments, evaluator and timestamp. |
 | `Summary by question` | Totals per question: valid, invalid, pending and count per reason. |
 | `Metadata` | Form, data file, number of images, evaluator, generation time and app version. |
+
+Reports are named `image_evaluation__<form>__<YYYYMMDD-HHMMSS>.xlsx` (never overwritten;
+`-2`, `-3`… are added if needed) and saved to `exports/` by default (`REPORTS_DIR` in `.env`).
+The same file can be imported later to resume the review; keep the `Evaluations` columns
+(`Image key`, `Image URL`, `Question name`, `Evaluation status`, reasons, `Comments`,
+`Evaluator`, `Evaluated at (UTC)`) if you edit it.
 
 ## ✅ Quality and automation
 

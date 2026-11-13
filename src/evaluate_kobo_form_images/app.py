@@ -11,7 +11,6 @@ import io
 import os
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
-from datetime import datetime
 from pathlib import Path
 
 import streamlit as st
@@ -39,7 +38,17 @@ from evaluate_kobo_form_images.kobo_client import (
     KoboImageClient,
 )
 from evaluate_kobo_form_images.kobo_export import ExportScan, ImageRecord, scan_export
-from evaluate_kobo_form_images.report import PENDING, build_report
+from evaluate_kobo_form_images.report import (
+    PENDING,
+    ReportSaveError,
+    build_report,
+    save_report,
+)
+from evaluate_kobo_form_images.report_import import (
+    ImportResult,
+    ReportImportError,
+    import_report,
+)
 from evaluate_kobo_form_images.xlsform import KoboForm, parse_xlsform
 
 load_dotenv()
@@ -305,10 +314,13 @@ def filtered_records(scan: ExportScan, store: EvaluationStore) -> list[ImageReco
         options=list(labels),
         format_func=lambda name: f"{labels[name]}  ({name})",
         placeholder="All image questions",
+        key="filter_questions",
     )
-    status = cols[1].selectbox("Status", STATUS_FILTERS)
+    status = cols[1].selectbox("Status", STATUS_FILTERS, key="filter_status")
     people = sorted({r.submitted_by for r in scan.records if r.submitted_by})
-    submitters = cols[2].multiselect("Submitted by", people, placeholder="Everyone")
+    submitters = cols[2].multiselect(
+        "Submitted by", people, placeholder="Everyone", key="filter_submitters"
+    )
     return [
         r
         for r in scan.records
@@ -454,7 +466,6 @@ def render_evaluation_form(
                 evaluator=evaluator.strip(),
             )
         )
-        st.session_state.pop("report", None)
         st.session_state.target_key = next_key if save_next and next_key else record.key
         st.rerun()
 
@@ -465,33 +476,104 @@ def render_evaluation_form(
         )
         if st.button("🗑️ Clear this evaluation", key=f"clear_{record.key}"):
             store.remove(record.key)
-            st.session_state.pop("report", None)
             st.session_state.target_key = record.key
             st.rerun()
 
 
-def render_export(form: KoboForm, scan: ExportScan, store: EvaluationStore, evaluator: str) -> None:
-    """Sidebar section to build and download the Excel report."""
-    with st.sidebar:
-        st.header("4. Export")
-        include_pending = st.checkbox("Include images not evaluated yet", value=True)
-        if st.button("Build Excel report", width="stretch"):
-            with st.spinner("Building the report..."):
-                st.session_state.report = build_report(
-                    scan.records,
-                    store.evaluations,
-                    evaluator=evaluator,
-                    include_pending=include_pending,
-                )
-        if st.session_state.get("report"):
-            stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
-            st.download_button(
-                "⬇️ Download Excel",
-                data=st.session_state.report,
-                file_name=f"image_evaluation__{Path(form.file_name).stem}__{stamp}.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                width="stretch",
+def _report_dir_default() -> str:
+    return str(Path(os.path.expanduser(os.getenv("REPORTS_DIR", "exports"))).resolve())
+
+
+def _export_block(form: KoboForm, scan: ExportScan, store: EvaluationStore, evaluator: str) -> None:
+    """Save the Excel report directly into a local folder (no browser download)."""
+    if "report_dir" not in st.session_state:
+        st.session_state["report_dir"] = _report_dir_default()
+    st.text_input("Save to folder", key="report_dir")
+    include_pending = st.checkbox("Include images not evaluated yet", value=True)
+    if st.button("💾 Export report", key="export_report", width="stretch"):
+        st.session_state.pop("last_report_path", None)
+        st.session_state.pop("last_report_error", None)
+        with st.spinner("Saving the report…"):
+            content = build_report(
+                scan.records,
+                store.evaluations,
+                evaluator=evaluator,
+                include_pending=include_pending,
             )
+            try:
+                path = save_report(content, st.session_state["report_dir"], form.file_name)
+            except ReportSaveError as exc:
+                st.session_state["last_report_error"] = str(exc)
+            else:
+                st.session_state["last_report_path"] = str(path)
+    if st.session_state.get("last_report_path"):
+        st.success(f"Report saved to {st.session_state['last_report_path']}")
+    if st.session_state.get("last_report_error"):
+        st.error(st.session_state["last_report_error"])
+
+
+def _render_import_summary(result: ImportResult) -> None:
+    st.success(
+        f"Restored {result.restored} evaluations from {result.report_name} "
+        f"({result.added} added, {result.updated} updated, {result.unchanged} unchanged)."
+    )
+    if result.form_mismatch:
+        st.warning(
+            f"This report was created for form '{result.report_form_file}' and data "
+            f"'{result.report_data_file}'. Only matching images were restored."
+        )
+    if result.not_matched:
+        st.warning(f"{result.not_matched} evaluated rows did not match any image in this export.")
+    if result.rejected:
+        with st.expander(f"{len(result.rejected)} rows were rejected"):
+            st.markdown("\n".join(f"- Row {r.row_number}: {r.reason}" for r in result.rejected))
+    if result.complete:
+        st.success("All images in this export are evaluated.")
+
+
+def _import_block(scan: ExportScan, store: EvaluationStore) -> None:
+    """Restore evaluations from a previously exported report and jump to the next image."""
+    st.markdown("**Resume from a previous report**")
+    uploaded = st.file_uploader("Previous report (.xlsx)", type=["xlsx"], key="import_report_file")
+    if (
+        st.button(
+            "⤴ Import report", key="import_report", width="stretch", disabled=uploaded is None
+        )
+        and uploaded is not None
+    ):
+        content = uploaded.getvalue()
+        fingerprint = f"{uploaded.name}:{hashlib.sha1(content).hexdigest()}"
+        if st.session_state.get("imported_fingerprint") == fingerprint:
+            st.info("This report was already imported.")
+        else:
+            try:
+                result = import_report(io.BytesIO(content), uploaded.name, scan.records, store)
+            except ReportImportError as exc:
+                st.session_state.pop("import_result", None)
+                st.error(exc.message)
+            else:
+                st.session_state["import_result"] = result
+                st.session_state["imported_fingerprint"] = fingerprint
+                st.session_state["filter_questions"] = []
+                st.session_state["filter_status"] = "All"
+                st.session_state["filter_submitters"] = []
+                if result.resume_key is not None:
+                    st.session_state.target_key = result.resume_key
+                st.rerun()  # redraw counters and filters with the restored evaluations
+    result = st.session_state.get("import_result")
+    if result is not None:
+        _render_import_summary(result)
+
+
+def render_report_section(
+    form: KoboForm, scan: ExportScan, store: EvaluationStore, evaluator: str
+) -> None:
+    """Sidebar section "4. Report": local export and resume from a previous report."""
+    with st.sidebar:
+        st.header("4. Report")
+        _export_block(form, scan, store, evaluator)
+        st.divider()
+        _import_block(scan, store)
         st.caption(f"Evaluations autosave to `{store.path}`.")
 
 
@@ -519,7 +601,7 @@ def main() -> None:
         f"**Form:** {form.title} (`{form.file_name}`) · **Data:** `{scan.records[0].data_file}`"
     )
     render_summary(form, scan, store)
-    render_export(form, scan, store, evaluator)
+    render_report_section(form, scan, store, evaluator)
     st.divider()
 
     records = filtered_records(scan, store)
