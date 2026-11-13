@@ -1,8 +1,0 @@
-blank_issues_enabled: false
-contact_links:
-  - name: "📘 Project constitution"
-    url: "https://github.com/jasonCastano/evaluate_kobo_form_images/blob/main/CONSTITUTION.md"
-    about: "Stack, architecture decisions, conventions and workflow."
-  - name: "🤝 Contributing guide"
-    url: "https://github.com/jasonCastano/evaluate_kobo_form_images/blob/main/CONTRIBUTING.md"
-    about: "Branching, Conventional Commits and Pull Request process."
