@@ -50,7 +50,7 @@ dev = [
 line-length = 100
 target-version = "py313"
 src = ["src", "tests"]
-# Vendored Spec Kit scripts are managed by `specify`, not linted here.
+# Vendored tooling scripts are not linted here.
 extend-exclude = [".specify"]
 
 [tool.ruff.lint]
