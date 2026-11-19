@@ -67,6 +67,7 @@ NOT_PUBLISHED = [
     ".github/pull_request_template.md",
     ".github/ISSUE_TEMPLATE/bug_report.yml",
     "newfile.txt",
+    "evaluations/custom_reasons.json",
 ]
 
 

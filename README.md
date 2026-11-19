@@ -26,7 +26,8 @@ properly. **Evaluate Kobo Form Images** is a local web app that lets an evaluato
 1. Load a **Kobo form** (XLSForm `.xlsx`) and the **data exported from Kobo** for that form.
 2. **Sign in to Kobo** so the private image attachments can be displayed.
 3. Look at every collected image with its context and mark it **Valid** or **Invalid** — an
-   invalid image needs one or more reasons, plus optional comments.
+   invalid image needs one or more reasons (four built-in ones plus any reason you add),
+   plus optional comments.
 4. **Save an Excel report** to a local folder that links every evaluation to its form, data
    file, row, submission, question and image.
 5. **Resume** later — on another day, computer or by another evaluator — by importing a
@@ -58,6 +59,7 @@ properly. **Evaluate Kobo Form Images** is a local web app that lets an evaluato
 | Kobo sign-in | Username & password or API key; the key stays in memory only and is sent only to your Kobo server. |
 | Fast image display | EXIF rotation, resizing, local cache and prefetch of the next images. |
 | Fast review | Filters by question, status and enumerator; *Save & next*; *Next pending*. |
+| Your own reasons | Add invalid reasons that are not in the list; they are kept on this computer for every form and get their own report column. |
 | Autosave | Every decision is saved immediately; reopening the same form and export continues where you left off. |
 | Local report | Excel report saved straight into a folder you choose — never overwritten. |
 | Resume from a report | Import a previous report: evaluations are restored and merged (newer wins, nothing deleted) and the viewer jumps to the next pending image. |
@@ -164,7 +166,8 @@ press `Ctrl+C` in it to stop the app.
 │    Save to folder        [____] │ │ │                    │ │ Question label            │ │
 │    💾 Export report             │ │ │      (photo)       │ │ Question name, group, row │ │
 │    Previous report (.xlsx)      │ │ │                    │ │ Is the image valid?       │ │
-│    ⤴ Import report              │ │ └────────────────────┘ │ reasons · comments · Save │ │
+│    ⤴ Import report              │ │ └────────────────────┘ │ reasons · New reason      │ │
+│ Manage invalid reasons     [▸]  │ │                        │ comments · Add · Save     │ │
 └─────────────────────────────────┘ └─────────────────────────────────────────────────────┘
 ```
 
@@ -202,6 +205,12 @@ press `Ctrl+C` in it to stop the app.
      - `Too bright / overexposed`
      - `Out of focus / blurry`
      - `Invalid image content` (wrong subject, wrong part of the plant, not the requested photo…)
+     - any **custom reason** you added (listed after the four built-in ones).
+   - `New reason` + `➕ Add reason` — if the problem is not in the list, type a short name
+     (e.g. `Finger over the lens`) and press `➕ Add reason`. The reason is added **already
+     ticked** for the current image and nothing you entered is lost; the evaluation itself is
+     saved only when you press `💾 Save`. Names have at most 60 characters, cannot contain `;`
+     and must be different from existing reasons (ignoring upper/lower case and spaces).
    - `Additional comments` (optional, free text).
    - Press `💾 Save` to stay on the image or `💾 Save & next` to save and move to the next one.
    - The app refuses incomplete answers with `Select whether the image is valid or invalid.` or
@@ -210,6 +219,16 @@ press `Ctrl+C` in it to stop the app.
      Choosing *Valid* ignores any ticked reason.
 10. **Export the report and resume later** — sidebar **4. Report**, see
     [Reports: export and resume](#-reports-export-and-resume).
+11. **Manage your reasons** — sidebar **Manage invalid reasons**: the four built-in reasons are
+    listed as `default` and cannot be changed. For each custom reason you can type a new name and
+    press `Rename` (images already saved with it are updated), or press `Hide` to stop offering it
+    for new images (`Restore` brings it back). A hidden reason stays ticked on the images that use
+    it and still appears in reports. Reasons are never deleted.
+
+> 🏷️ **Custom reasons are permanent on this computer.** They are stored in
+> `evaluations\custom_reasons.json` (next to your autosaved evaluations), shown every time you
+> start the app and offered for **every form**. Back that file up together with your evaluations.
+> Another computer learns them automatically when it imports one of your reports.
 
 > ✅ Every save is written to disk immediately. You can close the browser or stop the app at any
 > time; loading the same form and data export again restores your evaluations.
@@ -266,7 +285,8 @@ Use this to continue on another day, another computer or with a colleague's repo
 
 The app restores every evaluated row — verdict, reasons, comments, evaluator and date — saves it
 immediately to the autosave (so every later report includes it), resets the filters and opens the
-**first pending image after the last evaluated image of the report**.
+**first pending image after the last evaluated image of the report**. Custom reasons used in the
+report that this computer does not know yet are added to your list of reasons.
 
 The summary explains what happened:
 
@@ -275,7 +295,8 @@ The summary explains what happened:
 | `Restored N evaluations from <file> (A added, U updated, K unchanged).` | *added*: images you had not evaluated; *updated*: your evaluation was older than the report's; *unchanged*: identical, or yours was newer or as new |
 | `This report was created for form '…' and data '…'. Only matching images were restored.` | The report belongs to another form/export; only images present in the loaded export were restored |
 | `N evaluated rows did not match any image in this export.` | Rows whose image is not in the loaded export (different export, or submission deleted) |
-| `N rows were rejected` | Rows with an unknown status or reason, *Invalid* without reasons, or an invalid date (expand to see each row) |
+| `Added invalid reasons: …` | The report used custom reasons this computer did not know; they are now in your list |
+| `N rows were rejected` | Rows with an unknown status, an invalid reason name (empty, longer than 60 characters or containing `;`), *Invalid* without reasons, or an invalid date (expand to see each row) |
 | `All images in this export are evaluated.` | Nothing left to review |
 | `This report was already imported.` | Same file imported twice in this session — nothing changes |
 
@@ -290,7 +311,7 @@ importing the same report twice changes nothing.
 | Sheet | Content |
 |-------|---------|
 | `Evaluations` | One row per image (see columns below); the status cell is coloured green/red/yellow and the image URL is a link. |
-| `Summary by question` | Per question: total images, `Valid`, `Invalid`, `Pending` and the count of each reason. |
+| `Summary by question` | Per question: total images, `Valid`, `Invalid`, `Pending` and the count of each reason (built-in and custom). |
 | `Metadata` | Form file and title, data file, images in the data file, images evaluated, evaluator, generation time (UTC) and app version. |
 
 <details>
@@ -302,7 +323,10 @@ importing the same report twice changes nothing.
 | Submission | `Submission ID`, `Submission UUID`, `Submission time`, `Submitted by`, `Kobo validation status`, `Repeat index`, `Parent table`, `Parent index` |
 | Question | `Question name`, `Question label`, `Question group`, `Export column` |
 | Image | `Image file name`, `Image URL`, `Image key` |
-| Evaluation | `Evaluation status` (`Valid` / `Invalid` / `Pending`), `Reason: Low lighting`, `Reason: Too bright / overexposed`, `Reason: Out of focus / blurry`, `Reason: Invalid image content` (each `Yes` or empty), `Invalid reasons`, `Comments`, `Evaluator`, `Evaluated at (UTC)` |
+| Evaluation | `Evaluation status` (`Valid` / `Invalid` / `Pending`), `Reason: Low lighting`, `Reason: Too bright / overexposed`, `Reason: Out of focus / blurry`, `Reason: Invalid image content`, then one `Reason: <name>` column per custom reason (each `Yes` or empty), `Invalid reasons`, `Comments`, `Evaluator`, `Evaluated at (UTC)` |
+
+Custom reasons get a column when they are offered or when an exported image uses them (hidden
+reasons appear only if used). Without custom reasons the report has exactly the columns above.
 
 To re-import an edited report keep at least: `Image key`, `Image URL`, `Question name`,
 `Evaluation status`, `Invalid reasons` (or the `Reason: …` columns), `Comments`, `Evaluator` and
@@ -320,7 +344,8 @@ never committed).
 | `KOBO_API_TOKEN` | *(empty)* | Kobo API key for automatic sign-in; leave empty to sign in from the sidebar |
 | `KOBO_FORMS_DIR` | `forms` | Folder listed in *Form (XLSForm)* |
 | `KOBO_DATA_DIR` | `data` | Folder listed in *Data export* |
-| `EVALUATIONS_DIR` | `evaluations` | Autosave folder |
+| `EVALUATIONS_DIR` | `evaluations` | Autosave folder (also holds `custom_reasons.json`) |
+| `CUSTOM_REASONS_FILE` | `<EVALUATIONS_DIR>/custom_reasons.json` | File that keeps your custom invalid reasons |
 | `IMAGE_CACHE_DIR` | `.cache/images` | Downloaded image cache (`make clean-cache` empties it) |
 | `REPORTS_DIR` | `exports` | Default *Save to folder* for reports |
 
@@ -343,6 +368,8 @@ Field data never enters Git: `forms/`, `data/`, `evaluations/`, `exports/`, `.ca
 | `Could not save the report to <path>: <reason>` | Invalid folder, no permission, file open in Excel, slow/offline drive | Choose another folder or close the file and retry |
 | `This file is not an evaluation report exported by this app.` / `The report is missing required columns: …` | Wrong file or edited report | Use a report exported by the app; keep the required columns |
 | `N rows were rejected` / `N evaluated rows did not match any image in this export.` | Edited rows, or a report from another export | Expand the list; load the matching export |
+| `Could not read the custom reasons file (…)` | `custom_reasons.json` was edited by hand or damaged | Only the built-in reasons are shown and the file is left as it is. Fix the file or restore a backup; if you add a reason, the damaged file is kept as `custom_reasons.json.unreadable-<date>` |
+| `'<name>' already exists.` / `Reason names …` | The new reason repeats an existing one or breaks the name rules | Tick the existing reason, or choose a shorter name without `;` |
 | `uv run` hangs or packages go to another environment | Global `UV_PROJECT_ENVIRONMENT` or no access to PyPI | Use `.\.venv\Scripts\evaluate-kobo-images.exe` or `make run` |
 
 ## ✅ Quality checks

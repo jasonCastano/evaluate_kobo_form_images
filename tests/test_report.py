@@ -9,6 +9,7 @@ from openpyxl import load_workbook
 
 from evaluate_kobo_form_images.evaluation import Evaluation, InvalidReason, Verdict
 from evaluate_kobo_form_images.kobo_export import scan_export
+from evaluate_kobo_form_images.reasons import DEFAULT_REASONS
 from evaluate_kobo_form_images.report import EVALUATION_COLUMNS, build_report
 from evaluate_kobo_form_images.xlsform import parse_xlsform
 
@@ -67,3 +68,39 @@ def test_report_can_exclude_pending_and_summarizes_by_question(
     summary = {r["Question name"]: r for r in _rows(content, "Summary by question")}
     assert summary[records[0].question_name]["Valid"] == 1
     assert sum(int(str(r["Total images"])) for r in summary.values()) == len(records)
+
+
+def test_report_has_columns_and_counts_for_custom_reasons(
+    form_path: Path, export_path: Path
+) -> None:
+    # Arrange
+    records = scan_export(export_path, parse_xlsform(form_path)).records
+    target = records[1]
+    evaluations = {
+        target.key: Evaluation(
+            record_key=target.key,
+            verdict=Verdict.INVALID,
+            reasons=["Finger over the lens", InvalidReason.BLURRY],
+        ),
+        records[0].key: Evaluation(record_key=records[0].key, verdict=Verdict.VALID),
+    }
+    reasons = [*DEFAULT_REASONS, "Finger over the lens", "Valid"]
+
+    # Act
+    content = build_report(records, evaluations, reasons=reasons)
+
+    # Assert
+    rows = _rows(content, "Evaluations")
+    header = list(rows[0])
+    custom_column = header.index("Reason: Finger over the lens")
+    assert header[custom_column - 1] == f"Reason: {DEFAULT_REASONS[-1]}"
+    assert header[custom_column + 2] == "Invalid reasons"
+    row = next(r for r in rows if r["Image key"] == target.key)
+    assert row["Reason: Finger over the lens"] == "Yes"
+    assert row["Invalid reasons"] == "Finger over the lens; Out of focus / blurry"
+    assert all(not r["Reason: Finger over the lens"] for r in rows if r is not row)
+    summary = {r["Question name"]: r for r in _rows(content, "Summary by question")}
+    assert summary[target.question_name]["Finger over the lens"] == 1
+    assert summary[records[0].question_name]["Valid"] == 1  # verdict count, not the reason
+    assert summary[records[0].question_name]["Reason: Valid"] == 0  # no clash with verdicts
+    assert sum(int(str(r["Valid"])) for r in summary.values()) == 1
