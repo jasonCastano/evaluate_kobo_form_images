@@ -3,7 +3,9 @@
 The input is the Excel file written by :func:`evaluate_kobo_form_images.report.build_report`
 (see ``specs/002-report-export-resume/contracts/report-format.md``). Rows are matched to the
 images of the current export by ``Image key``, falling back to ``(Image URL, Question name)``,
-validated against the closed evaluation vocabulary and merged into the autosave store.
+validated against the evaluation vocabulary and merged into the autosave store. Reasons that
+are not known yet (custom reasons of another installation) are accepted when their names are
+valid and registered in the custom reason catalogue.
 """
 
 from __future__ import annotations
@@ -19,11 +21,17 @@ from openpyxl import load_workbook
 from evaluate_kobo_form_images.evaluation import (
     Evaluation,
     EvaluationStore,
-    InvalidReason,
     Verdict,
     parse_timestamp,
 )
 from evaluate_kobo_form_images.kobo_export import ImageRecord
+from evaluate_kobo_form_images.reasons import (
+    DEFAULT_REASONS,
+    ReasonCatalogue,
+    ReasonError,
+    clean_reason_name,
+    normalize_reason,
+)
 from evaluate_kobo_form_images.report import (
     EVALUATIONS_SHEET,
     METADATA_SHEET,
@@ -42,7 +50,6 @@ REQUIRED_COLUMNS: tuple[str, ...] = (
 )
 REASONS_TEXT_COLUMN = "Invalid reasons"
 NOT_A_REPORT = "This file is not an evaluation report exported by this app."
-_VALID_REASONS = {reason.value: reason for reason in InvalidReason}
 
 
 class ReportImportError(Exception):
@@ -95,6 +102,8 @@ class ImportResult:
     rejected: list[RejectedRow]
     resume_key: str | None
     complete: bool
+    new_reasons: list[str] = field(default_factory=list)
+    reasons_error: str | None = None
 
     @property
     def restored(self) -> int:
@@ -121,7 +130,7 @@ def _metadata(workbook: Any) -> dict[str, str]:
 
 
 def _parse_row(
-    row_number: int, row: dict[str, str], reason_columns: list[str]
+    row_number: int, row: dict[str, str], reason_columns: list[str], known: dict[str, str]
 ) -> _ParsedRow | RejectedRow | None:
     status = row.get("Evaluation status", "")
     if status in ("", PENDING):
@@ -134,14 +143,22 @@ def _parse_row(
         for column in reason_columns
         if row.get(column, "").casefold() == "yes"
     ]
-    reasons: list[InvalidReason] = []
+    reasons: list[str] = []
+    seen: set[str] = set()
     for name in names:
         if not name:
             continue
-        if name not in _VALID_REASONS:
-            return RejectedRow(row_number, f"Unknown reason '{name}'")
-        if _VALID_REASONS[name] not in reasons:
-            reasons.append(_VALID_REASONS[name])
+        key = normalize_reason(name)
+        if key in known:
+            canonical = known[key]
+        else:
+            try:
+                canonical = clean_reason_name(name)
+            except ReasonError:
+                return RejectedRow(row_number, f"Invalid reason name '{name}'")
+        if key not in seen:
+            seen.add(key)
+            reasons.append(canonical)
     if status == Verdict.INVALID.value and not reasons:
         return RejectedRow(row_number, "Invalid without reasons")
     evaluated_at = row.get("Evaluated at (UTC)", "")
@@ -166,8 +183,13 @@ def _parse_row(
     )
 
 
-def read_report(source: str | Path | BinaryIO, file_name: str) -> ParsedReport:
+def read_report(
+    source: str | Path | BinaryIO, file_name: str, catalogue: ReasonCatalogue | None = None
+) -> ParsedReport:
     """Parse and validate a report.
+
+    Reason names equal (ignoring case and spacing) to a known reason take its display name;
+    other well-formed names are kept as they are.
 
     Raises:
         ReportImportError: when the file is not a report of this app or misses columns.
@@ -190,6 +212,8 @@ def read_report(source: str | Path | BinaryIO, file_name: str) -> ParsedReport:
             raise ReportImportError(
                 f"The report is missing required columns: {', '.join(missing)}."
             )
+        known_names = catalogue.all_names() if catalogue is not None else DEFAULT_REASONS
+        known = {normalize_reason(name): name for name in known_names}
         metadata = _metadata(workbook)
         parsed = ParsedReport(
             form_file=metadata.get("Form file", ""), data_file=metadata.get("Data file", "")
@@ -199,7 +223,7 @@ def read_report(source: str | Path | BinaryIO, file_name: str) -> ParsedReport:
             if not parsed.form_file:
                 parsed.form_file = row.get("Form file", "")
                 parsed.data_file = row.get("Data file", "")
-            outcome = _parse_row(row_number, row, reason_columns)
+            outcome = _parse_row(row_number, row, reason_columns, known)
             if isinstance(outcome, RejectedRow):
                 parsed.rejected.append(outcome)
             elif outcome is not None:
@@ -228,13 +252,17 @@ def import_report(
     file_name: str,
     records: Sequence[ImageRecord],
     store: EvaluationStore,
+    catalogue: ReasonCatalogue | None = None,
 ) -> ImportResult:
     """Read a report, match its rows to ``records``, merge them into ``store`` and resume.
+
+    Reasons used by matched rows and unknown to ``catalogue`` are added to it first; if that
+    fails the evaluations are still merged and ``reasons_error`` explains why.
 
     Raises:
         ReportImportError: when the whole file is rejected (``store`` is left untouched).
     """
-    parsed = read_report(source, file_name)
+    parsed = read_report(source, file_name, catalogue)
     by_key = {record.key: record for record in records}
     by_url = {(record.image_url, record.question_name): record for record in records}
     matched: dict[str, Evaluation] = {}
@@ -257,6 +285,14 @@ def import_report(
             )
         matched[record.key] = evaluation
         last_key = record.key
+    new_reasons: list[str] = []
+    reasons_error: str | None = None
+    if catalogue is not None:
+        used = [reason for evaluation in matched.values() for reason in evaluation.reasons]
+        try:
+            new_reasons = catalogue.ensure(used)
+        except (OSError, ReasonError) as exc:
+            reasons_error = f"The new invalid reasons of this report could not be saved: {exc}"
     merge = store.merge(matched.values())
     first = records[0] if records else None
     mismatch = (
@@ -280,4 +316,6 @@ def import_report(
         rejected=parsed.rejected,
         resume_key=resume_key,
         complete=resume_key is None,
+        new_reasons=new_reasons,
+        reasons_error=reasons_error,
     )
