@@ -10,6 +10,13 @@ from datetime import UTC, datetime
 from enum import StrEnum
 from pathlib import Path
 
+from evaluate_kobo_form_images.reasons import InvalidReason as InvalidReason
+from evaluate_kobo_form_images.reasons import (
+    ReasonError,
+    clean_reason_name,
+    normalize_reason,
+)
+
 
 class Verdict(StrEnum):
     """Outcome of an image evaluation."""
@@ -18,22 +25,17 @@ class Verdict(StrEnum):
     INVALID = "Invalid"
 
 
-class InvalidReason(StrEnum):
-    """Reasons an image can be rejected."""
-
-    LOW_LIGHT = "Low lighting"
-    TOO_BRIGHT = "Too bright / overexposed"
-    BLURRY = "Out of focus / blurry"
-    INVALID_CONTENT = "Invalid image content"
-
-
 @dataclass
 class Evaluation:
-    """The evaluator's decision about one image record."""
+    """The evaluator's decision about one image record.
+
+    ``reasons`` holds reason display names: default ones (:class:`InvalidReason`) or custom
+    ones (see :mod:`evaluate_kobo_form_images.reasons`).
+    """
 
     record_key: str
     verdict: Verdict
-    reasons: list[InvalidReason] = field(default_factory=list)
+    reasons: list[str] = field(default_factory=list)
     comments: str = ""
     evaluator: str = ""
     evaluated_at: str = field(
@@ -42,7 +44,17 @@ class Evaluation:
 
     def __post_init__(self) -> None:
         self.verdict = Verdict(self.verdict)
-        self.reasons = [InvalidReason(reason) for reason in self.reasons]
+        reasons: list[str] = []
+        seen: set[str] = set()
+        for reason in self.reasons:
+            try:
+                name = clean_reason_name(str(reason))
+            except ReasonError as exc:
+                raise ValueError(f"Invalid reason {str(reason)!r}: {exc.message}") from None
+            if normalize_reason(name) not in seen:
+                seen.add(normalize_reason(name))
+                reasons.append(name)
+        self.reasons = reasons
         self.comments = self.comments.strip()
         if self.verdict is Verdict.INVALID and not self.reasons:
             raise ValueError("An invalid image needs at least one reason.")
@@ -53,7 +65,7 @@ class Evaluation:
         """Serialize to plain JSON-compatible values."""
         data = asdict(self)
         data["verdict"] = self.verdict.value
-        data["reasons"] = [reason.value for reason in self.reasons]
+        data["reasons"] = [str(reason) for reason in self.reasons]
         return data
 
 
