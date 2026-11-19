@@ -6,7 +6,7 @@ import io
 import os
 import re
 from collections import Counter
-from collections.abc import Iterable, Mapping
+from collections.abc import Iterable, Mapping, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from concurrent.futures import TimeoutError as FutureTimeout
 from datetime import UTC, datetime
@@ -18,15 +18,16 @@ from openpyxl.utils import get_column_letter
 from openpyxl.worksheet.worksheet import Worksheet
 
 from evaluate_kobo_form_images import __version__
-from evaluate_kobo_form_images.evaluation import Evaluation, InvalidReason, Verdict
+from evaluate_kobo_form_images.evaluation import Evaluation, Verdict
 from evaluate_kobo_form_images.kobo_export import ImageRecord
+from evaluate_kobo_form_images.reasons import DEFAULT_REASONS, normalize_reason, report_reasons
 
 PENDING = "Pending"
 EVALUATIONS_SHEET = "Evaluations"
 METADATA_SHEET = "Metadata"
 REASON_COLUMN_PREFIX = "Reason: "
 
-EVALUATION_COLUMNS: list[str] = [
+_SOURCE_COLUMNS: list[str] = [
     "Form file",
     "Form title",
     "Data file",
@@ -48,12 +49,21 @@ EVALUATION_COLUMNS: list[str] = [
     "Image URL",
     "Image key",
     "Evaluation status",
-    *(f"{REASON_COLUMN_PREFIX}{reason.value}" for reason in InvalidReason),
-    "Invalid reasons",
-    "Comments",
-    "Evaluator",
-    "Evaluated at (UTC)",
 ]
+_TRAILING_COLUMNS: list[str] = ["Invalid reasons", "Comments", "Evaluator", "Evaluated at (UTC)"]
+_SUMMARY_FIXED = ["Question name", "Question label", "Total images"]
+
+
+def evaluation_columns(reasons: Sequence[str] = DEFAULT_REASONS) -> list[str]:
+    """Header of the ``Evaluations`` sheet with one ``Reason: <name>`` column per reason."""
+    return [
+        *_SOURCE_COLUMNS,
+        *(f"{REASON_COLUMN_PREFIX}{reason}" for reason in reasons),
+        *_TRAILING_COLUMNS,
+    ]
+
+
+EVALUATION_COLUMNS: list[str] = evaluation_columns()
 
 _HEADER_FONT = Font(bold=True, color="FFFFFF")
 _HEADER_FILL = PatternFill("solid", fgColor="305496")
@@ -64,9 +74,13 @@ _STATUS_FILL = {
 }
 
 
-def evaluation_row(record: ImageRecord, evaluation: Evaluation | None) -> list[object]:
+def evaluation_row(
+    record: ImageRecord,
+    evaluation: Evaluation | None,
+    reasons: Sequence[str] = DEFAULT_REASONS,
+) -> list[object]:
     """Return the report row for one image and its (optional) evaluation."""
-    reasons = set(evaluation.reasons) if evaluation else set()
+    chosen = {normalize_reason(name) for name in evaluation.reasons} if evaluation else set()
     return [
         record.form_file,
         record.form_title,
@@ -89,8 +103,8 @@ def evaluation_row(record: ImageRecord, evaluation: Evaluation | None) -> list[o
         record.image_url,
         record.key,
         evaluation.verdict.value if evaluation else PENDING,
-        *(("Yes" if reason in reasons else "") for reason in InvalidReason),
-        "; ".join(reason.value for reason in evaluation.reasons) if evaluation else "",
+        *(("Yes" if normalize_reason(reason) in chosen else "") for reason in reasons),
+        "; ".join(evaluation.reasons) if evaluation else "",
         evaluation.comments if evaluation else "",
         evaluation.evaluator if evaluation else "",
         evaluation.evaluated_at if evaluation else "",
@@ -112,6 +126,7 @@ def build_report(
     *,
     evaluator: str = "",
     include_pending: bool = True,
+    reasons: Sequence[str] | None = None,
 ) -> bytes:
     """Create the evaluation workbook and return it as ``.xlsx`` bytes.
 
@@ -120,26 +135,35 @@ def build_report(
           submission, question and evaluation.
         * ``Summary by question``: counts of valid / invalid / pending images and reasons.
         * ``Metadata``: report provenance.
+
+    ``reasons`` lists the reason columns (defaults first); by default the defaults plus any
+    other reason used by an evaluation.
     """
     records = list(records)
+    reason_names = list(reasons) if reasons else report_reasons(None, evaluations.values())
+    columns = evaluation_columns(reason_names)
     workbook = Workbook()
     sheet = workbook.active
     assert isinstance(sheet, Worksheet)
     sheet.title = EVALUATIONS_SHEET
-    sheet.append(EVALUATION_COLUMNS)
-    status_col = EVALUATION_COLUMNS.index("Evaluation status") + 1
-    url_col = EVALUATION_COLUMNS.index("Image URL") + 1
+    sheet.append(columns)
+    status_col = columns.index("Evaluation status") + 1
+    url_col = columns.index("Image URL") + 1
 
-    summary: dict[tuple[str, str], Counter[str]] = {}
+    verdicts: dict[tuple[str, str], Counter[str]] = {}
+    reason_counts: dict[tuple[str, str], Counter[str]] = {}
     for record in records:
         evaluation = evaluations.get(record.key)
-        counter = summary.setdefault((record.question_name, record.question_label), Counter())
-        counter[evaluation.verdict.value if evaluation else PENDING] += 1
+        question = (record.question_name, record.question_label)
+        verdicts.setdefault(question, Counter())[
+            evaluation.verdict.value if evaluation else PENDING
+        ] += 1
+        counter = reason_counts.setdefault(question, Counter())
         for reason in evaluation.reasons if evaluation else []:
-            counter[reason.value] += 1
+            counter[normalize_reason(reason)] += 1
         if evaluation is None and not include_pending:
             continue
-        sheet.append(evaluation_row(record, evaluation))
+        sheet.append(evaluation_row(record, evaluation, reason_names))
         row = sheet.max_row
         status_cell = sheet.cell(row=row, column=status_col)
         status_cell.fill = _STATUS_FILL[str(status_cell.value)]
@@ -150,20 +174,28 @@ def build_report(
     sheet.auto_filter.ref = sheet.dimensions
 
     summary_sheet = workbook.create_sheet("Summary by question")
-    summary_header = [
-        "Question name",
-        "Question label",
-        "Total images",
-        Verdict.VALID.value,
-        Verdict.INVALID.value,
-        PENDING,
-        *(reason.value for reason in InvalidReason),
-    ]
-    summary_sheet.append(summary_header)
-    for (name, label), counter in summary.items():
-        total = counter[Verdict.VALID.value] + counter[Verdict.INVALID.value] + counter[PENDING]
+    verdict_columns = [Verdict.VALID.value, Verdict.INVALID.value, PENDING]
+    taken = {normalize_reason(column) for column in (*_SUMMARY_FIXED, *verdict_columns)}
+    summary_sheet.append(
+        [
+            *_SUMMARY_FIXED,
+            *verdict_columns,
+            *(
+                f"{REASON_COLUMN_PREFIX}{name}" if normalize_reason(name) in taken else name
+                for name in reason_names
+            ),
+        ]
+    )
+    for (name, label), counter in verdicts.items():
+        reasons_here = reason_counts[(name, label)]
         summary_sheet.append(
-            [name, label, total, *(counter[column] for column in summary_header[3:])]
+            [
+                name,
+                label,
+                sum(counter[column] for column in verdict_columns),
+                *(counter[column] for column in verdict_columns),
+                *(reasons_here[normalize_reason(reason)] for reason in reason_names),
+            ]
         )
     _style_header(summary_sheet, {1: 30, 2: 45})
 

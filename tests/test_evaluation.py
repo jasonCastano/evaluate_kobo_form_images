@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
@@ -44,6 +45,65 @@ def test_store_autosaves_and_resumes(tmp_path: Path) -> None:
     assert reloaded.verdict is Verdict.INVALID
     assert reloaded.reasons == [InvalidReason.LOW_LIGHT, InvalidReason.BLURRY]
     assert reloaded.comments == "shaded canopy"
+
+
+def test_evaluation_accepts_custom_and_default_reasons_as_names() -> None:
+    evaluation = Evaluation(
+        record_key="k",
+        verdict=Verdict.INVALID,
+        reasons=[InvalidReason.BLURRY, "  Finger   over the lens "],
+    )
+
+    assert evaluation.reasons == ["Out of focus / blurry", "Finger over the lens"]
+    stored = evaluation.to_dict()["reasons"]
+    assert isinstance(stored, list)
+    assert all(type(reason) is str for reason in stored)
+
+
+def test_evaluation_drops_duplicate_reasons_by_key_keeping_the_first() -> None:
+    evaluation = Evaluation(
+        record_key="k",
+        verdict=Verdict.INVALID,
+        reasons=["Finger over the lens", "finger OVER the lens", "Low lighting"],
+    )
+
+    assert evaluation.reasons == ["Finger over the lens", "Low lighting"]
+
+
+@pytest.mark.parametrize("name", ["", "a;b", "x" * 61])
+def test_evaluation_rejects_malformed_reason_names(name: str) -> None:
+    with pytest.raises(ValueError, match=r"[Rr]eason"):
+        Evaluation(record_key="k", verdict=Verdict.INVALID, reasons=["Low lighting", name])
+
+
+def test_store_loads_existing_autosave_with_default_reasons(tmp_path: Path) -> None:
+    # Arrange: an autosave written before custom reasons existed
+    (tmp_path / "form__data.json").write_text(
+        json.dumps(
+            {
+                "form_file": "form.xlsx",
+                "data_file": "data.xlsx",
+                "evaluations": [
+                    {
+                        "record_key": "abc",
+                        "verdict": "Invalid",
+                        "reasons": ["Low lighting", "Invalid image content"],
+                        "comments": "",
+                        "evaluator": "",
+                        "evaluated_at": "2026-11-12T10:00:00+00:00",
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    # Act
+    loaded = EvaluationStore(tmp_path, "form.xlsx", "data.xlsx").get("abc")
+
+    # Assert
+    assert loaded is not None
+    assert loaded.reasons == [InvalidReason.LOW_LIGHT, InvalidReason.INVALID_CONTENT]
 
 
 def test_store_remove_deletes_evaluation(tmp_path: Path) -> None:

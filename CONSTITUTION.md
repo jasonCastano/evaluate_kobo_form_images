@@ -50,8 +50,8 @@ question and image.
 - Signing in to Kobo from the UI (username & password exchanged once for the API key, or
   an API key) and downloading attachments with it (attachments are not public), with a local
   display cache and prefetching of the next images.
-- Evaluation per image: **Valid / Invalid**; when invalid, one or more reasons from a closed
-  list plus free-text comments.
+- Evaluation per image: **Valid / Invalid**; when invalid, one or more reasons (four defaults
+  plus custom reasons the evaluator adds) and free-text comments.
 - Autosave and resume of evaluations per *(form, data export)* pair.
 - Excel report (`Evaluations`, `Summary by question`, `Metadata` sheets) saved directly to a
   local folder chosen in the UI (default `exports/`), never overwriting earlier reports.
@@ -66,9 +66,16 @@ question and image.
 
 ## 3. Domain rules (invariants)
 
-1. **Invalid reasons are a closed list** defined in `evaluation.InvalidReason`:
-   `Low lighting`, `Too bright / overexposed`, `Out of focus / blurry`,
-   `Invalid image content`. Changing it is a constitutional change (report columns depend on it).
+1. **Invalid reasons are a controlled list.** The **default reasons** are defined in
+   `evaluation.InvalidReason`: `Low lighting`, `Too bright / overexposed`,
+   `Out of focus / blurry`, `Invalid image content`; they are fixed, always listed first and
+   cannot be renamed or hidden (changing them is a constitutional change). Evaluators may add
+   **custom reasons** (`reasons.ReasonCatalogue`): 1–60 characters, no `;`, no control
+   characters, unique ignoring case and spacing. They are stored locally in
+   `evaluations/custom_reasons.json` (overridable with `CUSTOM_REASONS_FILE`), shared by all
+   forms of the installation, never deleted (only hidden; renaming updates saved
+   evaluations), exported as their own `Reason: <name>` report columns and registered
+   automatically when an imported report uses them.
 2. An **Invalid** evaluation requires **at least one reason**; a **Valid** one stores none.
    Comments are always optional.
 3. Every image record carries a **stable key** = hash of *(submission UUID, sheet, `_index`,
@@ -129,6 +136,7 @@ question and image.
 | `kobo_auth.py` | Kobo servers, sign-in (password → API key via `/token/`, key check via `/me/`), in-memory `KoboSession`. |
 | `kobo_client.py` | Host-scoped authenticated attachment download with typed failures, display JPEG conversion, disk cache. |
 | `evaluation.py` | `Verdict`, `InvalidReason`, `Evaluation` validation and `EvaluationStore` persistence. |
+| `reasons.py` | Invalid-reason name rules, the persistent custom-reason catalogue, renaming across saved evaluations and report reason columns. |
 | `report.py` | Excel report generation and local saving (`save_report`: timestamped name, atomic write, timeout). |
 | `report_import.py` | Import of a previous report: validation, matching (key, then URL + question), merge, resume position. |
 | `app.py` | Streamlit UI (no business logic beyond orchestration). |
@@ -267,6 +275,8 @@ git push                         # 5. push, then: gh pr create --base develop
 | 2026-11-13 | Keep tests, CI, pre-commit and Makefile on `main` | Released code stays verified (feature 004, Q1 = C) |
 | 2026-11-13 | Do not rewrite `main` history when removing developer files | No force-push; private repository (feature 004, Q2 = A) |
 | 2026-11-13 | Merge stacked PRs #1 and #2 with merge commits (not squash) | Avoid rewriting a published branch; keeps human-authored commits (feature 003). Lesson: never delete the base branch of an open stacked PR (it closes the PR); retarget it to `main` first |
+| 2026-11-19 | Allow local custom invalid reasons (Principle III amended, MAJOR → 2.0.0) | Evaluators need categories beyond the four defaults, countable in the report (feature 005) |
+| 2026-11-19 | Store custom reasons in `evaluations/custom_reasons.json`, shared by all forms of the installation; never delete, only hide | Persist across restarts without tracking data in Git; old evaluations never point to a missing reason (feature 005) |
 | 2026-11-12 | Field data and tokens are git-ignored | Data protection |
 | 2026-11-12 | Sign in with Kobo username/password via `/token/` (password used once, key in memory only) | Reviewers know passwords, not API keys (spec 001) |
 | 2026-11-12 | Send the API key only to the signed-in server host | Prevent token leakage |

@@ -20,7 +20,6 @@ from evaluate_kobo_form_images import __version__, kobo_auth
 from evaluate_kobo_form_images.evaluation import (
     Evaluation,
     EvaluationStore,
-    InvalidReason,
     Verdict,
 )
 from evaluate_kobo_form_images.kobo_auth import (
@@ -38,6 +37,14 @@ from evaluate_kobo_form_images.kobo_client import (
     KoboImageClient,
 )
 from evaluate_kobo_form_images.kobo_export import ExportScan, ImageRecord, scan_export
+from evaluate_kobo_form_images.reasons import (
+    ReasonCatalogue,
+    ReasonError,
+    catalogue_path,
+    reason_widget_id,
+    rename_reason_in_stores,
+    report_reasons,
+)
 from evaluate_kobo_form_images.report import (
     PENDING,
     ReportSaveError,
@@ -70,6 +77,11 @@ SESSION_KEY = "kobo_session"
 CLIENT_KEY = "kobo_client"
 ERROR_KEY = "kobo_auth_error"
 ENV_ATTEMPT_KEY = "kobo_env_attempted"
+REASON_ERROR_KEY = "reason_error"
+REASON_NOTICE_KEY = "reason_notice"
+REASON_WARNED_KEY = "reason_file_warned"
+MANAGE_MESSAGE_KEY = "manage_reasons_message"
+MANAGE_ERROR_KEY = "manage_reasons_error"
 
 
 # --------------------------------------------------------------------------- loaders
@@ -411,14 +423,49 @@ def render_details(record: ImageRecord) -> None:
         st.json(record.context, expanded=False)
 
 
+def reason_key(name: str, record_key: str) -> str:
+    """Session-state key of the checkbox of reason ``name`` for one image."""
+    return f"reason_{reason_widget_id(name)}_{record_key}"
+
+
+def _add_reason_callback(catalogue: ReasonCatalogue, record_key: str) -> None:
+    """Add the typed reason and tick it, keeping everything else entered in the form."""
+    input_key = f"new_reason_{record_key}"
+    try:
+        name = catalogue.add(st.session_state.get(input_key, ""))
+    except ReasonError as exc:
+        st.session_state[REASON_ERROR_KEY] = exc.message
+        return
+    except OSError as exc:
+        st.session_state[REASON_ERROR_KEY] = f"Could not save the new reason: {exc}"
+        return
+    st.session_state[reason_key(name, record_key)] = True
+    st.session_state[input_key] = ""
+    notice = f"Added reason '{name}'."
+    if catalogue.backup_path is not None:
+        notice += f" The unreadable file was kept as {catalogue.backup_path.name}."
+    st.session_state[REASON_NOTICE_KEY] = notice
+
+
+def _reason_checkbox(name: str, record_key: str, ticked: bool) -> bool:
+    key = reason_key(name, record_key)
+    if key in st.session_state:
+        return st.checkbox(name, key=key)
+    return st.checkbox(name, value=ticked, key=key)
+
+
 def render_evaluation_form(
     record: ImageRecord,
     store: EvaluationStore,
     evaluator: str,
     next_key: str | None,
+    catalogue: ReasonCatalogue,
 ) -> None:
     """Render the valid / invalid form for the current image and persist the answer."""
     current = store.get(record.key)
+    saved = {reason_widget_id(name) for name in current.reasons} if current else set()
+    if notice := st.session_state.pop(REASON_NOTICE_KEY, None):
+        st.toast(notice)
     with st.form(key=f"eval_{record.key}", border=True):
         st.markdown("**Evaluation**")
         verdict = st.radio(
@@ -430,23 +477,34 @@ def render_evaluation_form(
         )
         st.caption("If invalid, select at least one reason:")
         selected = [
-            reason
-            for reason in InvalidReason
-            if st.checkbox(
-                reason.value,
-                value=bool(current and reason in current.reasons),
-                key=f"reason_{reason.name}_{record.key}",
-            )
+            name
+            for name in catalogue.offered_names(current.reasons if current else ())
+            if _reason_checkbox(name, record.key, reason_widget_id(name) in saved)
         ]
+        st.text_input(
+            "New reason",
+            max_chars=60,
+            key=f"new_reason_{record.key}",
+            placeholder="e.g. Finger over the lens",
+            help="Add a reason that is not in the list; it stays available for every form.",
+        )
         comments = st.text_area(
             "Additional comments",
             value=current.comments if current else "",
             height=100,
             key=f"comments_{record.key}",
         )
-        cols = st.columns(2)
-        save = cols[0].form_submit_button("💾 Save", width="stretch")
-        save_next = cols[1].form_submit_button("💾 Save & next", type="primary", width="stretch")
+        cols = st.columns(3)
+        cols[0].form_submit_button(
+            "➕ Add reason",  # noqa: RUF001 - emoji icon, like the other buttons
+            width="stretch",
+            on_click=_add_reason_callback,
+            args=(catalogue, record.key),
+        )
+        save = cols[1].form_submit_button("💾 Save", width="stretch")
+        save_next = cols[2].form_submit_button("💾 Save & next", type="primary", width="stretch")
+    if error := st.session_state.pop(REASON_ERROR_KEY, None):
+        st.error(error)
 
     if save or save_next:
         if verdict is None:
@@ -480,11 +538,91 @@ def render_evaluation_form(
             st.rerun()
 
 
+def _forget_reason_widgets(name: str) -> None:
+    """Drop the per-image checkbox states of a reason (after it was renamed)."""
+    prefix = f"reason_{reason_widget_id(name)}_"
+    for key in [k for k in st.session_state if str(k).startswith(prefix)]:
+        del st.session_state[key]
+
+
+def _rename_reason_callback(catalogue: ReasonCatalogue, old: str) -> None:
+    old_id = reason_widget_id(old)
+    try:
+        new = catalogue.rename(old, st.session_state.get(f"rename_input_{old_id}", ""))
+        files = rename_reason_in_stores(EVALUATIONS_DIR, old, new)
+    except ReasonError as exc:
+        st.session_state[MANAGE_ERROR_KEY] = exc.message
+        return
+    except OSError as exc:
+        st.session_state[MANAGE_ERROR_KEY] = f"Could not rename the reason: {exc}"
+        return
+    if reason_widget_id(new) != old_id:
+        _forget_reason_widgets(old)
+        st.session_state.pop(f"rename_input_{old_id}", None)
+    st.session_state[MANAGE_MESSAGE_KEY] = (
+        f"Renamed '{old}' to '{new}' in {files} saved evaluation file(s)."
+    )
+
+
+def _hide_reason_callback(catalogue: ReasonCatalogue, name: str, hidden: bool) -> None:
+    try:
+        catalogue.set_hidden(name, hidden)
+    except (ReasonError, OSError) as exc:
+        st.session_state[MANAGE_ERROR_KEY] = getattr(exc, "message", str(exc))
+        return
+    state = "hidden" if hidden else "restored"
+    st.session_state[MANAGE_MESSAGE_KEY] = f"Reason '{name}' {state}."
+
+
+def render_manage_reasons(catalogue: ReasonCatalogue) -> None:
+    """Sidebar expander to rename, hide and restore custom reasons (defaults are fixed)."""
+    with st.sidebar.expander("Manage invalid reasons"):
+        if message := st.session_state.pop(MANAGE_MESSAGE_KEY, None):
+            st.success(message)
+        if error := st.session_state.pop(MANAGE_ERROR_KEY, None):
+            st.error(error)
+        for name in catalogue.all_names():
+            if catalogue.is_default(name):
+                st.caption(f"{name} · default")
+        custom = catalogue.custom()
+        if not custom:
+            st.caption("No custom reasons yet: add one from the evaluation form.")
+        for reason in custom:
+            reason_id = reason_widget_id(reason.name)
+            label = f"{reason.name} (hidden)" if reason.hidden else reason.name
+            st.markdown(f"**{label}**")
+            input_key = f"rename_input_{reason_id}"
+            if input_key not in st.session_state:
+                st.session_state[input_key] = reason.name
+            st.text_input("New name", key=input_key, max_chars=60, label_visibility="collapsed")
+            cols = st.columns(2)
+            cols[0].button(
+                "Rename",
+                key=f"rename_{reason_id}",
+                on_click=_rename_reason_callback,
+                args=(catalogue, reason.name),
+                width="stretch",
+            )
+            cols[1].button(
+                "Restore" if reason.hidden else "Hide",
+                key=f"hide_{reason_id}",
+                on_click=_hide_reason_callback,
+                args=(catalogue, reason.name, not reason.hidden),
+                width="stretch",
+            )
+
+
 def _report_dir_default() -> str:
     return str(Path(os.path.expanduser(os.getenv("REPORTS_DIR", "exports"))).resolve())
 
 
-def _export_block(form: KoboForm, scan: ExportScan, store: EvaluationStore, evaluator: str) -> None:
+def _export_block(
+    form: KoboForm,
+    scan: ExportScan,
+    store: EvaluationStore,
+    evaluator: str,
+    catalogue: ReasonCatalogue,
+) -> None:
     """Save the Excel report directly into a local folder (no browser download)."""
     if "report_dir" not in st.session_state:
         st.session_state["report_dir"] = _report_dir_default()
@@ -499,6 +637,7 @@ def _export_block(form: KoboForm, scan: ExportScan, store: EvaluationStore, eval
                 store.evaluations,
                 evaluator=evaluator,
                 include_pending=include_pending,
+                reasons=report_reasons(catalogue, store.evaluations.values()),
             )
             try:
                 path = save_report(content, st.session_state["report_dir"], form.file_name)
@@ -524,6 +663,10 @@ def _render_import_summary(result: ImportResult) -> None:
         )
     if result.not_matched:
         st.warning(f"{result.not_matched} evaluated rows did not match any image in this export.")
+    if result.new_reasons:
+        st.info(f"Added invalid reasons: {', '.join(result.new_reasons)}.")
+    if result.reasons_error:
+        st.warning(result.reasons_error)
     if result.rejected:
         with st.expander(f"{len(result.rejected)} rows were rejected"):
             st.markdown("\n".join(f"- Row {r.row_number}: {r.reason}" for r in result.rejected))
@@ -531,7 +674,7 @@ def _render_import_summary(result: ImportResult) -> None:
         st.success("All images in this export are evaluated.")
 
 
-def _import_block(scan: ExportScan, store: EvaluationStore) -> None:
+def _import_block(scan: ExportScan, store: EvaluationStore, catalogue: ReasonCatalogue) -> None:
     """Restore evaluations from a previously exported report and jump to the next image."""
     st.markdown("**Resume from a previous report**")
     uploaded = st.file_uploader("Previous report (.xlsx)", type=["xlsx"], key="import_report_file")
@@ -547,7 +690,9 @@ def _import_block(scan: ExportScan, store: EvaluationStore) -> None:
             st.info("This report was already imported.")
         else:
             try:
-                result = import_report(io.BytesIO(content), uploaded.name, scan.records, store)
+                result = import_report(
+                    io.BytesIO(content), uploaded.name, scan.records, store, catalogue
+                )
             except ReportImportError as exc:
                 st.session_state.pop("import_result", None)
                 st.error(exc.message)
@@ -566,14 +711,18 @@ def _import_block(scan: ExportScan, store: EvaluationStore) -> None:
 
 
 def render_report_section(
-    form: KoboForm, scan: ExportScan, store: EvaluationStore, evaluator: str
+    form: KoboForm,
+    scan: ExportScan,
+    store: EvaluationStore,
+    evaluator: str,
+    catalogue: ReasonCatalogue,
 ) -> None:
     """Sidebar section "4. Report": local export and resume from a previous report."""
     with st.sidebar:
         st.header("4. Report")
-        _export_block(form, scan, store, evaluator)
+        _export_block(form, scan, store, evaluator, catalogue)
         st.divider()
-        _import_block(scan, store)
+        _import_block(scan, store, catalogue)
         st.caption(f"Evaluations autosave to `{store.path}`.")
 
 
@@ -597,11 +746,17 @@ def main() -> None:
         return
 
     store = EvaluationStore(EVALUATIONS_DIR, form.file_name, scan.records[0].data_file)
+    catalogue = ReasonCatalogue(catalogue_path(EVALUATIONS_DIR))
+    catalogue.custom()  # read once so an unreadable file is reported
+    if catalogue.load_error and not st.session_state.get(REASON_WARNED_KEY):
+        st.session_state[REASON_WARNED_KEY] = True
+        st.warning(catalogue.load_error)
     st.caption(
         f"**Form:** {form.title} (`{form.file_name}`) · **Data:** `{scan.records[0].data_file}`"
     )
     render_summary(form, scan, store)
-    render_report_section(form, scan, store, evaluator)
+    render_report_section(form, scan, store, evaluator, catalogue)
+    render_manage_reasons(catalogue)
     st.divider()
 
     records = filtered_records(scan, store)
@@ -620,7 +775,7 @@ def main() -> None:
     with right:
         render_details(record)
         next_key = records[pos + 1].key if pos + 1 < len(records) else None
-        render_evaluation_form(record, store, evaluator, next_key)
+        render_evaluation_form(record, store, evaluator, next_key, catalogue)
 
 
 if __name__ == "__main__":

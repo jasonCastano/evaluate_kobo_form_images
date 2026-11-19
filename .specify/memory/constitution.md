@@ -1,9 +1,9 @@
 <!--
 Sync Impact Report
-- Version: 1.0.0 → 1.1.0 (2026-11-13)
-- Modified section: Development Workflow (branch model: develop / user-only main, feature 004)
-- Principles defined: I–VIII (unchanged)
-- Added sections: Technology & Data Constraints, Development Workflow, Governance
+- Version: 1.1.0 → 2.0.0 (2026-11-19)
+- Modified principle: III. Closed Evaluation Vocabulary → III. Controlled Evaluation Vocabulary
+  (MAJOR: principle redefined to allow local custom invalid reasons, feature 005)
+- Principles defined: I–VIII
 - Templates requiring updates: none (plan/spec/tasks templates read this file as-is)
 - Follow-up TODOs: none
 -->
@@ -31,12 +31,16 @@ to form questions by XML name, then by any label (all languages, markup/case/spa
 prefix insensitive, duplicates resolved in form order). Unmatched columns are still listed and
 flagged as unmapped.
 
-### III. Closed Evaluation Vocabulary
+### III. Controlled Evaluation Vocabulary
 
-An evaluation is **Valid** or **Invalid**. Invalid requires at least one reason from the closed
-list `Low lighting`, `Too bright / overexposed`, `Out of focus / blurry`,
-`Invalid image content`; comments are optional free text. Changing the list is a
-constitutional (MAJOR) change because report columns depend on it.
+An evaluation is **Valid** or **Invalid** (closed list). Invalid requires at least one reason;
+comments are optional free text. The four **default reasons** `Low lighting`,
+`Too bright / overexposed`, `Out of focus / blurry`, `Invalid image content` are fixed, always
+listed first and cannot be renamed or hidden. Evaluators MAY add **custom reasons** that
+follow the name rules (1–60 characters, no `;`, no control characters, unique ignoring case
+and spacing). Custom reasons are local data (git-ignored `evaluations/custom_reasons.json`),
+shared by all forms of the installation, never deleted (only hidden), and get their own
+report columns. Changing the defaults or the verdicts is a constitutional (MAJOR) change.
 
 ### IV. Logic Outside the UI
 
@@ -95,4 +99,4 @@ plan's Complexity Tracking. Amendments: document the change and rationale in the
 `/CONSTITUTION.md` decision log, bump this version (MAJOR: principle removed/redefined;
 MINOR: principle/section added; PATCH: clarification), and update both files together.
 
-**Version**: 1.1.0 | **Ratified**: 2026-11-12 | **Last Amended**: 2026-11-13
+**Version**: 2.0.0 | **Ratified**: 2026-11-12 | **Last Amended**: 2026-11-19

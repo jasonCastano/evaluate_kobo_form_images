@@ -3,6 +3,10 @@
 The Excel report written by `report.build_report` (format of app v0.1.0) is also the input of
 the resume feature. Changing these columns is a breaking change for import.
 
+> **Update (feature 005):** reason columns are dynamic — custom invalid reasons add
+> `Reason: <name>` columns and unknown reasons are registered on import. See
+> [`specs/005-custom-invalid-reasons/contracts/report-format.md`](../../005-custom-invalid-reasons/contracts/report-format.md).
+
 ## Sheet `Evaluations` (required)
 
 Row 1 = headers (exact text, trimmed). Columns used by import:

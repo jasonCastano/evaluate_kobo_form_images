@@ -15,6 +15,7 @@ from evaluate_kobo_form_images.evaluation import (
     Verdict,
 )
 from evaluate_kobo_form_images.kobo_export import ImageRecord, scan_export
+from evaluate_kobo_form_images.reasons import ReasonCatalogue
 from evaluate_kobo_form_images.report import build_report
 from evaluate_kobo_form_images.report_import import (
     ReportImportError,
@@ -37,7 +38,7 @@ def _evaluation(
     key: str,
     verdict: Verdict,
     when: str,
-    reasons: list[InvalidReason] | None = None,
+    reasons: list[str] | None = None,
     comments: str = "",
     evaluator: str = "",
 ) -> Evaluation:
@@ -144,7 +145,7 @@ def test_fallback_match_and_not_matched_rows(tmp_path: Path, records: list[Image
             },
             "Invalid without reasons",
         ),
-        ({(4, "Invalid reasons"): "Too dark"}, "Unknown reason 'Too dark'"),
+        ({(4, "Invalid reasons"): "x" * 61}, f"Invalid reason name '{'x' * 61}'"),
         ({(2, "Evaluated at (UTC)"): "yesterday"}, "Invalid evaluation date 'yesterday'"),
     ],
 )
@@ -259,3 +260,108 @@ def test_merge_with_local_work_keeps_newest(tmp_path: Path, records: list[ImageR
     assert result.updated == 1
     updated_b = store.get(b)
     assert updated_b is not None and updated_b.verdict is Verdict.INVALID
+
+
+# --------------------------------------------------------------------------- custom reasons
+CUSTOM = "Finger over the lens"
+
+
+def _custom_report(records: list[ImageRecord]) -> bytes:
+    evaluations = _two_evaluated(records)
+    evaluations[records[1].key] = _evaluation(
+        records[1].key, Verdict.INVALID, "2026-11-12T10:10:00+00:00", reasons=[CUSTOM]
+    )
+    return build_report(records, evaluations, reasons=[*(r.value for r in InvalidReason), CUSTOM])
+
+
+def test_import_registers_unknown_reasons(tmp_path: Path, records: list[ImageRecord]) -> None:
+    # Arrange: a report with a custom reason, imported on an installation that does not know it
+    catalogue = ReasonCatalogue(tmp_path / "custom_reasons.json")
+
+    # Act
+    result = import_report(
+        io.BytesIO(_custom_report(records)), "r.xlsx", records, _store(tmp_path, "b"), catalogue
+    )
+
+    # Assert
+    assert result.rejected == []
+    assert result.added == 3
+    assert result.new_reasons == [CUSTOM]
+    assert result.reasons_error is None
+    assert CUSTOM in ReasonCatalogue(tmp_path / "custom_reasons.json").all_names()
+    restored = _store(tmp_path, "b").get(records[1].key)
+    assert restored is not None and restored.reasons == [CUSTOM]
+
+
+def test_import_reads_reason_only_from_its_column(
+    tmp_path: Path, records: list[ImageRecord]
+) -> None:
+    content = _edit(_custom_report(records), {(3, "Invalid reasons"): ""})
+    catalogue = ReasonCatalogue(tmp_path / "custom_reasons.json")
+
+    result = import_report(io.BytesIO(content), "r.xlsx", records, _store(tmp_path, "b"), catalogue)
+
+    assert result.new_reasons == [CUSTOM]
+    restored = _store(tmp_path, "b").get(records[1].key)
+    assert restored is not None and restored.reasons == [CUSTOM]
+
+
+def test_import_canonicalizes_known_reasons(tmp_path: Path, records: list[ImageRecord]) -> None:
+    content = _edit(
+        _report(records, _two_evaluated(records)), {(4, "Invalid reasons"): "low LIGHTING"}
+    )
+    catalogue = ReasonCatalogue(tmp_path / "custom_reasons.json")
+
+    result = import_report(io.BytesIO(content), "r.xlsx", records, _store(tmp_path, "b"), catalogue)
+
+    assert result.new_reasons == []
+    restored = _store(tmp_path, "b").get(records[2].key)
+    assert restored is not None
+    assert restored.reasons == [InvalidReason.LOW_LIGHT, InvalidReason.BLURRY]
+
+
+def test_reasons_of_unmatched_rows_are_not_registered(
+    tmp_path: Path, records: list[ImageRecord]
+) -> None:
+    content = _edit(
+        _custom_report(records),
+        {(3, "Image key"): "nope", (3, "Image URL"): "https://kf.kobotoolbox.org/elsewhere/"},
+    )
+    catalogue = ReasonCatalogue(tmp_path / "custom_reasons.json")
+
+    result = import_report(io.BytesIO(content), "r.xlsx", records, _store(tmp_path, "b"), catalogue)
+
+    assert result.not_matched == 1
+    assert result.new_reasons == []
+    assert not (tmp_path / "custom_reasons.json").exists()
+
+
+def test_default_only_report_imports_as_before(tmp_path: Path, records: list[ImageRecord]) -> None:
+    content = _report(records, _two_evaluated(records))
+    catalogue = ReasonCatalogue(tmp_path / "custom_reasons.json")
+
+    result = import_report(io.BytesIO(content), "r.xlsx", records, _store(tmp_path, "b"), catalogue)
+
+    assert (result.added, result.updated, result.unchanged, len(result.rejected)) == (2, 0, 0, 0)
+    assert result.new_reasons == []
+
+
+def test_catalogue_write_failure_still_merges(
+    tmp_path: Path, records: list[ImageRecord], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Arrange
+    def fail(self: ReasonCatalogue, names: object) -> list[str]:
+        raise OSError("disk full")
+
+    monkeypatch.setattr(ReasonCatalogue, "ensure", fail)
+    catalogue = ReasonCatalogue(tmp_path / "custom_reasons.json")
+
+    # Act
+    result = import_report(
+        io.BytesIO(_custom_report(records)), "r.xlsx", records, _store(tmp_path, "b"), catalogue
+    )
+
+    # Assert
+    assert result.added == 3
+    assert result.new_reasons == []
+    assert result.reasons_error is not None and "disk full" in result.reasons_error
